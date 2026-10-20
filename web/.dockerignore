@@ -1,0 +1,13 @@
+node_modules
+.env
+.env.*
+.git
+.amp
+.svelte-kit
+build
+data
+tests
+playwright.config.ts
+test-results
+playwright-report
+.vscode

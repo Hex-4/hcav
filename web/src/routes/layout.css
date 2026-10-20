@@ -1,0 +1,55 @@
+@import "tailwindcss";
+
+@font-face {
+	font-family: "comic neue";
+	src: url("/fonts/comic-neue-regular.ttf") format("truetype");
+	font-weight: 400;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: "comic neue";
+	src: url("/fonts/comic-neue-bold.ttf") format("truetype");
+	font-weight: 700;
+	font-display: swap;
+}
+
+@theme {
+	--font-sans: "comic neue", "Comic Sans MS", cursive;
+	--color-hcav: #c73525;
+}
+
+@layer base {
+	html {
+		scroll-behavior: smooth;
+	}
+	body {
+		@apply bg-white font-sans text-lg leading-relaxed text-black antialiased;
+	}
+	button,
+	input,
+	select,
+	textarea {
+		font: inherit;
+	}
+	button,
+	summary {
+		cursor: pointer;
+	}
+	button:disabled {
+		cursor: wait;
+	}
+	:focus-visible {
+		outline: 2px solid var(--color-hcav);
+		outline-offset: 5px;
+	}
+	::selection {
+		background: #fbd9d3;
+		color: black;
+	}
+	@media (prefers-reduced-motion: reduce) {
+		html {
+			scroll-behavior: auto;
+		}
+	}
+}

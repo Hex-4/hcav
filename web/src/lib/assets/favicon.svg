@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+	<title>hcav</title>
+	<rect width="64" height="64" rx="8" fill="white" />
+	<text
+		x="10"
+		y="49"
+		font-family="Comic Sans MS, cursive"
+		font-size="56"
+		font-weight="bold"
+		fill="#c73525"
+	>
+		h
+	</text>
+</svg>

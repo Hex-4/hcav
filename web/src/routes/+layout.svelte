@@ -80,6 +80,11 @@ const isLanding = $derived(page.url.pathname === '/');
   font: revert;
 }
 
+.faq-page :global(a) {
+	color: revert;
+	text-decoration: revert;
+}
+
 .faq-page {
 	max-width: 65ch;
 	margin: 3rem auto;

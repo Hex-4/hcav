@@ -9,7 +9,7 @@ export default defineConfig({
 	outputDir: '../.amp/in/test-results',
 	use: { baseURL: 'http://localhost:5174', headless: true, trace: 'retain-on-failure' },
 	webServer: {
-		command: 'bun run build && node --import ./tests/providers.mjs build',
+		command: 'bun run build && bun --preload ./tests/providers.mjs ./build/index.js',
 		url: 'http://localhost:5174',
 		reuseExistingServer: false,
 		env: {

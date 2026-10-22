@@ -4,7 +4,7 @@ the world's second best scavenger hunt. registration only: landing page, hack cl
 
 ## local development
 
-requires node 24+ and bun.
+requires bun 1.4.2+; node is not required. package scripts explicitly run javascript tooling with bun, which also loads the local `.env` during development.
 
 ```sh
 bun install --frozen-lockfile
@@ -80,7 +80,7 @@ docker run --name hcav --restart unless-stopped \
   -v hcav-data:/data hcav
 ```
 
-the image runs as non-root, listens on port 3000, and includes a healthcheck. it does not include `.env`, tests, or development dependencies. your orchestrator should supply equivalent environment settings and a persistent `/data` volume owned by uid 1000.
+the image builds and runs with bun only, runs as the non-root `bun` user, listens on port 3000, and includes a healthcheck. it does not include `.env`, tests, or development dependencies. your orchestrator should supply equivalent environment settings and a persistent `/data` volume owned by uid 1000. the existing sveltekit `adapter-node` output runs under bun's node-api compatibility; it does not require a separate node executable. start a non-container production build with `bun ./build/index.js`.
 
 **run exactly one application process/replica, with no overlapping rolling replicas.** airtable has no transactions or compare-and-swap, so membership mutations are serialized in that process. local sqlite provides durable sessions, oauth state, invitation tokens, atomic rate limits, signed-command deduplication, and channel-addition jobs/retries; airtable remains the registration database. do not use an ephemeral filesystem or share the sqlite file over a network filesystem. back up airtable and sqlite; losing sqlite also loses pending jobs and deduplication history.
 

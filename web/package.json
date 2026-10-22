@@ -4,17 +4,17 @@
 	"version": "0.0.1",
 	"type": "module",
 	"scripts": {
-		"dev": "node --env-file-if-exists=.env node_modules/vite/bin/vite.js dev",
-		"build": "vite build",
-		"preview": "vite preview",
-		"prepare": "svelte-kit sync || echo ''",
-		"lint": "biome check .",
-		"lint:fix": "biome check --write .",
-		"format": "biome format --write .",
-		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-		"test": "playwright test",
-		"airtable:setup": "node --env-file=.env scripts/airtable-setup.mjs",
-		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch"
+		"dev": "bun --bun vite dev",
+		"build": "bun --bun vite build",
+		"preview": "bun --bun vite preview",
+		"prepare": "bun --bun svelte-kit sync || echo ''",
+		"lint": "bun --bun biome check .",
+		"lint:fix": "bun --bun biome check --write .",
+		"format": "bun --bun biome format --write .",
+		"check": "bun --bun svelte-kit sync && bun --bun svelte-check --tsconfig ./tsconfig.json",
+		"test": "bun --bun playwright test",
+		"airtable:setup": "bun --env-file=.env scripts/airtable-setup.mjs",
+		"check:watch": "bun --bun svelte-kit sync && bun --bun svelte-check --tsconfig ./tsconfig.json --watch"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.5.15",

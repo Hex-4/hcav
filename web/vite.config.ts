@@ -7,6 +7,9 @@ export default defineConfig(({ command }) => ({
 	plugins: [
 		tailwindcss(),
 		sveltekit({
+			// The server hook enforces same-origin mutations, except the HMAC-signed
+			// Slack webhook. Kit's pre-hook CSRF check has no per-route exemption.
+			csrf: { trustedOrigins: ['*'] },
 			paths: {
 				origin:
 					process.env.APP_ORIGIN || (command === 'build' ? 'https://hcav.hackclub.com' : undefined)

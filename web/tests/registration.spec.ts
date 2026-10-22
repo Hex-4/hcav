@@ -1,5 +1,5 @@
+import { createHmac } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { DatabaseSync } from 'node:sqlite';
 import {
 	type APIRequestContext,
 	type Browser,
@@ -12,11 +12,27 @@ import {
 const app = 'http://localhost:5174';
 const state = () =>
 	JSON.parse(readFileSync('../.amp/in/test-providers.json', 'utf8')) as {
-		people: { id: string; name: string; team_id?: string }[];
-		teams: { id: string; name: string; captain_id: string; link_token: string }[];
-		mail: { recipient: string; body: string; status: string }[];
-		slack: { channel: string; text: string; mrkdwn: boolean }[];
+		people: { id: string; name: string; team_id?: string; slack_id: string }[];
+		teams: {
+			id: string;
+			name: string;
+			captain_id: string;
+			link_token: string;
+			open_registration?: boolean;
+			hq_channel_id?: string;
+		}[];
+		slack: { method: string; channel: string; text?: string; users?: string; user?: string }[];
 	};
+const person = (actor: string) => {
+	const value = state().people.find((person) => person.id === `ident!${actor}`);
+	if (!value) throw new Error(`Missing person fixture: ${actor}`);
+	return value;
+};
+const team = (actor: string) => {
+	const value = state().teams.find((team) => team.captain_id === `ident!${actor}`);
+	if (!value) throw new Error(`Missing team fixture: ${actor}`);
+	return value;
+};
 
 async function signIn(request: APIRequestContext, actor: string, fault = '', next = '/team') {
 	const start = await request.get(`/auth/login?next=${encodeURIComponent(next)}`, {
@@ -41,410 +57,503 @@ const post = (request: APIRequestContext, form: Record<string, string>, path = '
 	request.post(path, { form, headers: { Origin: app, Accept: 'text/html' }, maxRedirects: 0 });
 const create = (request: APIRequestContext, name: string) =>
 	post(request, { action: 'create', name });
-async function actorContext(browser: Browser, name: string) {
+async function avatars(context: BrowserContext) {
+	await context.route('https://avatars.slack-edge.com/**', (route) =>
+		route.fulfill({
+			contentType: 'image/png',
+			body: Buffer.from(
+				'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+				'base64'
+			)
+		})
+	);
+}
+async function actorContext(browser: Browser, actor: string) {
 	const context = await browser.newContext({ baseURL: app });
-	expect((await signIn(context.request, name)).status()).toBe(303);
+	await avatars(context);
+	expect((await signIn(context.request, actor)).status()).toBe(303);
 	return context;
 }
-
 async function capture(page: Page, name: string) {
-	await expect(page.locator('body')).toHaveCSS(
-		'font-family',
-		'"comic neue", "Comic Sans MS", cursive'
-	);
-	expect(
-		await page.evaluate(async () => {
-			const faces = await Promise.all(
-				[400, 700].map((weight) => document.fonts.load(`${weight} 18px "comic neue"`))
-			);
-			return faces.every((fonts) => fonts.length > 0 && fonts.every((f) => f.status === 'loaded'));
-		})
-	).toBe(true);
+	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 	await page.screenshot({ path: `../.amp/in/artifacts/${name}.png`, fullPage: true });
 }
 
-test('landing, mobile, team creation, shared joining and captain permissions', async ({
+test('browser-default faq, registration, shared links and captain permissions', async ({
 	page,
 	context,
 	browser
 }) => {
+	await avatars(context);
 	await page.goto('about:blank');
-	const defaultFont = await page
-		.locator('body')
-		.evaluate((node) => getComputedStyle(node).fontFamily);
+	const font = await page.locator('body').evaluate((node) => getComputedStyle(node).fontFamily);
 	await page.goto('/');
-	await expect(page.locator('summary')).toHaveCount(2);
 	await expect(page.getByRole('banner')).toHaveCount(0);
-	await expect(page.getByRole('contentinfo')).toHaveCount(0);
-	await expect(page.locator('body')).toHaveCSS('font-family', defaultFont);
-	await page.screenshot({ path: '../.amp/in/artifacts/landing-desktop.png', fullPage: true });
-	await page.setViewportSize({ width: 390, height: 844 });
-	await page.screenshot({ path: '../.amp/in/artifacts/landing-mobile.png', fullPage: true });
-	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+	await expect(page.locator('body')).toHaveCSS('font-family', font);
 	await page.locator('summary').first().focus();
 	await page.keyboard.press('Enter');
-	await expect(page.locator('details').first().locator('p')).toBeVisible();
-	await page.locator('summary').nth(1).click();
-	await expect(page.locator('details').nth(1).locator('p')).toBeVisible();
-	await page.screenshot({ path: '../.amp/in/artifacts/faq-mobile.png', fullPage: true });
+	await expect(page.locator('details').first()).toHaveAttribute('open', '');
+	await capture(page, 'landing-desktop');
+	await page.setViewportSize({ width: 390, height: 844 });
+	await capture(page, 'landing-mobile');
 	expect((await context.request.get('/privacy')).status()).toBe(404);
-	await page.setViewportSize({ width: 1440, height: 1000 });
 	expect((await signIn(context.request, 'captain')).status()).toBe(303);
 	await page.goto('/team');
+	await expect(page.locator('body')).toHaveCSS('font-family', font);
+	await capture(page, 'register-mobile');
+	await page.setViewportSize({ width: 1280, height: 900 });
 	await capture(page, 'register-desktop');
-	await page.getByLabel('team name', { exact: true }).fill('department of bad ideas');
-	await page.getByRole('button', { name: 'register your team' }).click();
+	await page.getByLabel('Team name', { exact: true }).fill('department of bad ideas');
+	await page.getByRole('button', { name: 'Create team', exact: true }).click();
 	await expect(page.getByRole('heading', { name: 'department of bad ideas' })).toBeVisible();
-	const link = await page.getByLabel('your team invitation').inputValue();
+	await expect(page.getByLabel('Open registration')).not.toBeChecked();
+	const link = await page.getByLabel('Invite link', { exact: true }).inputValue();
 	await context.grantPermissions(['clipboard-read', 'clipboard-write']);
-	await page.getByRole('button', { name: 'copy link' }).click();
-	await expect(page.getByRole('button', { name: 'copied!' })).toBeVisible();
+	await page.getByRole('button', { name: 'Copy link' }).click();
+	await expect(page.getByRole('button', { name: 'Copied!' })).toBeVisible();
 	expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(link);
+
 	const member = await actorContext(browser, 'unverified-member');
 	const memberPage = await member.newPage();
 	await memberPage.goto(link);
-	await expect(memberPage.getByRole('heading', { name: 'department of bad ideas' })).toBeVisible();
-	await memberPage.getByRole('button', { name: 'join this team' }).click();
-	await expect(memberPage.getByRole('heading', { name: 'the personnel (2)' })).toBeVisible();
-	expect((await post(member.request, { action: 'rename', name: 'not allowed' })).status()).toBe(
-		403
+	await capture(memberPage, 'invite-signed-in');
+	await memberPage.getByRole('button', { name: 'Join this team' }).click();
+	await expect(memberPage.getByRole('heading', { name: 'The team (2)' })).toBeVisible();
+	for (const action of ['rename', 'registration', 'remove', 'transfer', 'rotate'])
+		expect(
+			(
+				await post(member.request, {
+					action,
+					name: 'not allowed',
+					member: 'ident!captain',
+					open: 'on'
+				})
+			).status(),
+			action
+		).toBe(403);
+	await capture(memberPage, 'team-member');
+	await page.reload();
+	await expect(
+		page.getByRole('link', { name: 'captain on slack', exact: true }).first()
+	).toBeVisible();
+	expect(await page.content()).not.toContain('private legal name');
+	expect(await page.content()).not.toContain('@example.com');
+	await capture(page, 'team-desktop');
+	await page.getByText('Other captain things', { exact: true }).click();
+	await capture(page, 'team-settings');
+	await page.setViewportSize({ width: 390, height: 844 });
+	await capture(page, 'team-mobile');
+	await page.getByLabel('Team name', { exact: true }).fill('department of worse ideas');
+	await page.getByRole('button', { name: 'Save name' }).click();
+	await expect(page.getByRole('heading', { name: 'department of worse ideas' })).toBeVisible();
+	expect((await post(context.request, { action: 'leave' })).status()).toBe(409);
+	page.once('dialog', (dialog) => dialog.accept());
+	await page.getByRole('button', { name: 'Make captain' }).click();
+	await expect(page.getByLabel('Open registration')).toHaveCount(0);
+	expect((await post(context.request, { action: 'rotate' })).status()).toBe(403);
+	expect((await post(member.request, { action: 'remove', member: 'ident!captain' })).status()).toBe(
+		200
 	);
+	expect(person('captain').team_id).toBe('');
+	await member.close();
+});
+
+test('oidc validates tokens, requires linked slack, keeps public names private and enforces csrf/logout', async ({
+	context,
+	page,
+	browser
+}) => {
+	await avatars(context);
+	expect((await context.request.get('/auth/callback?state=bogus&code=bogus')).status()).toBe(400);
+	for (const fault of ['nonce', 'signature', 'audience', 'expired'])
+		expect((await signIn(context.request, 'invalid-login', fault)).status(), fault).toBe(400);
+	expect(state().people.some((person) => person.id === 'ident!invalid-login')).toBe(false);
+	expect((await signIn(context.request, 'no-slack')).status()).toBe(403);
+	expect(
+		(await signIn(context.request, 'logout-user', '', '//evil.example')).headers().location
+	).toBe('/team');
+	const session = (await context.cookies()).find((cookie) => cookie.name === 'hcav_session');
+	if (!session) throw new Error('Missing session cookie');
+	expect(session.httpOnly).toBe(true);
+	expect(session.sameSite).toBe('Lax');
+	for (const path of ['/team', '/teams', '/auth/logout', `/join/${'L'.repeat(43)}`]) {
+		for (const headers of [{ Origin: 'https://evil.example' }, {}]) {
+			const result = await context.request.post(path, {
+				form: { action: 'create', name: 'forged', team: 'directory-0' },
+				headers,
+				maxRedirects: 0
+			});
+			expect(result.status(), path).toBe(403);
+		}
+	}
+	await page.goto('/team');
+	await page.getByRole('button', { name: 'Sign out' }).click();
+	await expect(page).toHaveURL(`${app}/`);
+	await context.addCookies([{ name: 'hcav_session', value: session.value, url: app }]);
+	expect((await context.request.get('/team', { maxRedirects: 0 })).headers().location).toContain(
+		'/auth/login'
+	);
+
+	for (const actor of ['cache-down', 'blank-name']) {
+		const fallback = await actorContext(browser, actor);
+		const html = await (await fallback.request.get('/team')).text();
+		expect(html).toContain(person(actor).slack_id);
+		expect(html).not.toContain('private legal name');
+		expect(html).not.toContain('private cachet real name');
+		await fallback.close();
+	}
+	const duplicate = await actorContext(browser, 'duplicate-a');
+	expect((await signIn(context.request, 'duplicate-b')).status()).toBe(409);
+	await duplicate.close();
+});
+
+test('directory is gated, shuffled with open teams first, and rechecks closed registration on join', async ({
+	browser,
+	request
+}) => {
+	const gated = await request.get('/teams', { maxRedirects: 0 });
+	expect(gated.status()).toBe(303);
+	expect(gated.headers().location).toContain('next=%2Fteams');
+	const captain = await actorContext(browser, 'directory-captain');
+	expect((await create(captain.request, 'the welcoming committee')).status()).toBe(200);
+	const member = await actorContext(browser, 'directory-member');
+	expect(
+		(await post(member.request, {}, `/join/${team('directory-captain').link_token}`)).status()
+	).toBe(303);
+	const guest = await actorContext(browser, 'directory-guest');
+	const page = await guest.newPage();
+	const orders = new Set<string>();
+	for (let index = 0; index < 4; index++) {
+		await page.goto('/teams');
+		const labels = await page.locator('main > ul > li').allTextContents();
+		const firstClosed = labels.findIndex((label) => label.includes('invite-only'));
+		expect(firstClosed).toBeGreaterThan(0);
+		expect(labels.slice(firstClosed).every((label) => !label.includes('open registration'))).toBe(
+			true
+		);
+		orders.add(labels.join('|'));
+	}
+	expect(orders.size).toBeGreaterThan(1);
+	const roster = page.getByRole('list', { name: 'People on the welcoming committee', exact: true });
+	await expect(roster.getByRole('listitem')).toHaveCount(2);
+	await expect(roster.getByRole('link', { name: 'directory-captain on slack' })).toHaveAttribute(
+		'href',
+		`https://hackclub.enterprise.slack.com/team/${person('directory-captain').slack_id}`
+	);
+	await expect(roster.getByRole('link', { name: 'directory-member on slack' })).toBeVisible();
+	await expect(roster.locator('img')).toHaveCount(2);
+	await expect(roster.getByRole('link', { name: 'directory-guest on slack' })).toHaveCount(0);
+	await expect(
+		page
+			.getByRole('list', { name: 'People on no maximum occupancy', exact: true })
+			.getByRole('listitem')
+	).toHaveCount(104);
+	const html = await page.content();
+	expect(html).not.toContain('link_token');
+	expect(html).not.toContain(team('directory-captain').link_token);
+	expect(html).not.toContain('@example.com');
+	expect(html).not.toContain('private legal name');
+	expect(html).not.toContain('private cachet real name');
+	expect(
+		(await post(guest.request, { team: team('directory-captain').id }, '/teams')).status()
+	).toBe(403);
+	const captainPage = await captain.newPage();
+	await captainPage.goto('/team');
+	await captainPage.getByLabel('Open registration').check();
+	await captainPage.getByRole('button', { name: 'Save registration' }).click();
+	await expect(captainPage.getByRole('status')).toHaveText('Saved.');
+	await page.reload();
+	await expect(page.getByRole('button', { name: 'Join the welcoming committee' })).toBeVisible();
+	await capture(page, 'teams-desktop');
+	await page.setViewportSize({ width: 390, height: 844 });
+	await capture(page, 'teams-mobile');
+	expect((await post(captain.request, { action: 'registration' })).status()).toBe(200);
+	await page.getByRole('button', { name: 'Join the welcoming committee' }).click();
+	await expect(page.getByRole('status')).toContainText('invite-only now');
+	expect(person('directory-guest').team_id).toBeUndefined();
+	const results = await Promise.all(
+		['directory-0', 'directory-2'].map((id) => post(guest.request, { team: id }, '/teams'))
+	);
+	expect(results.map((result) => result.status()).sort()).toEqual([303, 409]);
+	expect(['directory-0', 'directory-2']).toContain(person('directory-guest').team_id);
+	await page.goto('/teams');
+	await capture(page, 'teams-already-joined');
+	await captain.close();
+	await member.close();
+	await guest.close();
+});
+
+test('only bearer invitations remain; links expire and rotate without removing members', async ({
+	browser
+}) => {
+	const captain = await actorContext(browser, 'link-captain');
+	expect((await create(captain.request, 'link team')).status()).toBe(200);
+	const oldLink = `/join/${team('link-captain').link_token}`;
+	const anonymous = await browser.newContext({ baseURL: app });
+	const page = await anonymous.newPage();
+	await page.goto(oldLink);
+	await capture(page, 'invite-anonymous');
+	await page.setViewportSize({ width: 390, height: 844 });
+	await capture(page, 'invite-mobile');
+	await expect(
+		page.getByRole('link', { name: 'Sign in with Hack Club', exact: true })
+	).toHaveAttribute('href', `/auth/login?next=${encodeURIComponent(oldLink)}`);
+	expect((await signIn(anonymous.request, 'link-guest', '', oldLink)).headers().location).toBe(
+		oldLink
+	);
+	expect((await post(anonymous.request, {}, oldLink)).status()).toBe(303);
+	expect((await post(captain.request, { action: 'rotate' })).status()).toBe(200);
+	expect((await anonymous.request.get(oldLink)).status()).toBe(410);
+	expect(person('link-guest').team_id).toBe(team('link-captain').id);
+	expect((await anonymous.request.get(`/join/${'E'.repeat(43)}`)).status()).toBe(410);
+	expect((await anonymous.request.get(`/invite/${'A'.repeat(43)}`)).status()).toBe(404);
 	expect(
 		(
-			await post(member.request, {
+			await post(captain.request, {
 				action: 'invite',
 				channel: 'email',
 				recipient: 'victim@example.com'
 			})
 		).status()
-	).toBe(403);
-	await page.reload();
-	await capture(page, 'team-desktop');
-	await page.setViewportSize({ width: 390, height: 844 });
-	await capture(page, 'team-mobile');
-	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-	await page.setViewportSize({ width: 1440, height: 1000 });
-	await page.getByLabel('send via', { exact: true }).selectOption('slack');
-	await expect(page.getByLabel('their slack member id or profile link')).toBeVisible();
-	await capture(page, 'team-slack');
-	await page.getByLabel('send via', { exact: true }).selectOption('email');
-	await page.getByText('captain’s paperwork', { exact: true }).click();
-	await capture(page, 'team-paperwork');
-	await page.getByLabel('team name', { exact: true }).fill('department of worse ideas');
-	await page.getByRole('button', { name: 'save name' }).click();
-	await expect(page.getByRole('heading', { name: 'department of worse ideas' })).toBeVisible();
-	expect((await post(context.request, { action: 'leave' })).status()).toBe(409);
-	page.once('dialog', (dialog) => dialog.accept());
-	await page.getByRole('button', { name: 'make captain' }).click();
-	await expect(page.getByText('captain’s paperwork', { exact: true })).toHaveCount(0);
-	expect(
-		(await post(context.request, { action: 'remove', member: 'ident!unverified-member' })).status()
-	).toBe(403);
-	await memberPage.reload();
-	await expect(
-		memberPage.getByText('sending requires a verified, eligible', { exact: false })
-	).toBeVisible();
-	await capture(memberPage, 'team-unverified');
-	await member.close();
-	await page.getByRole('link', { name: 'hcav home' }).click();
-	await expect(page.locator('body')).toHaveCSS('font-family', defaultFont);
-	await expect(page.locator('summary')).toHaveCount(2);
-});
-
-test('oidc rejects invalid state, nonce, signature, audience and expiry; logout revokes sessions', async ({
-	context,
-	page
-}) => {
-	const invalid = await context.request.get('/auth/callback?state=bogus&code=bogus');
-	expect(invalid.status()).toBe(400);
-	for (const fault of ['nonce', 'signature', 'audience', 'expired']) {
-		const result = await signIn(context.request, 'invalid-login', fault);
-		expect(result.status(), fault).toBe(400);
-	}
-	expect(state().people.some((person) => person.id === 'ident!invalid-login')).toBe(false);
-	const success = await signIn(context.request, 'logout-user', '', '//evil.example');
-	expect(success.headers().location).toBe('/team');
-	const cookies = await context.cookies();
-	const session = cookies.find((cookie) => cookie.name === 'hcav_session');
-	expect(session?.httpOnly).toBe(true);
-	expect(session?.sameSite).toBe('Lax');
-	const crossSite = await context.request.post('/team', {
-		form: { action: 'create', name: 'forged' },
-		headers: { Origin: 'https://evil.example' }
-	});
-	expect(crossSite.status()).toBe(403);
-	await page.goto('/team');
-	await page.getByRole('button', { name: 'sign out' }).click();
-	await expect(page).toHaveURL(`${app}/`);
-	await context.addCookies([{ name: 'hcav_session', value: session?.value || '', url: app }]);
-	expect((await context.request.get('/team', { maxRedirects: 0 })).headers().location).toContain(
-		'/auth/login'
-	);
-});
-
-test('targeted invitations bind recipients, opt out, expire and revoke without removing members', async ({
-	browser
-}) => {
-	const sender = await actorContext(browser, 'dispatch-captain');
-	const name = 'the dispatch department https://evil.example @channel';
-	expect((await create(sender.request, name)).status()).toBe(200);
-	expect(
-		(
-			await post(sender.request, {
-				action: 'invite',
-				channel: 'email',
-				recipient: 'email-guest@example.com'
-			})
-		).status()
-	).toBe(200);
-	const mail = state().mail.find((row) => row.recipient === 'email-guest@example.com');
-	expect(mail?.status).toBe('ready');
-	expect(mail?.body).not.toContain('evil.example');
-	expect(mail?.body).not.toContain('@channel');
-	const link = mail?.body.match(/http:\/\/localhost:5174\/invite\/[A-Za-z0-9_-]{43}/)?.[0] || '';
-	expect(link).not.toBe('');
-	const stranger = await actorContext(browser, 'wrong-account');
-	expect((await post(stranger.request, {}, link)).status()).toBe(403);
-	const guest = await actorContext(browser, 'email-guest');
-	expect((await post(guest.request, {}, link)).status()).toBe(303);
-	expect(state().people.find((person) => person.id === 'ident!email-guest')?.team_id).toBe(
-		state().teams.find((team) => team.name === name)?.id
-	);
-	expect((await post(guest.request, {}, link)).status()).toBe(410);
-	expect(
-		(
-			await post(sender.request, {
-				action: 'invite',
-				channel: 'slack',
-				recipient: 'https://hackclub.slack.com/team/UFRIEND001'
-			})
-		).status()
-	).toBe(200);
-	const dm = state().slack.find((row) => row.channel === 'DFRIEND001');
-	expect(dm?.mrkdwn).toBe(false);
-	const dmLink = dm?.text.match(/http:\/\/localhost:5174\/invite\/[A-Za-z0-9_-]{43}/)?.[0] || '';
-	const slackGuest = await actorContext(browser, 'slack-guest');
-	expect((await post(slackGuest.request, {}, dmLink)).status()).toBe(303);
-	expect(
-		(
-			await post(sender.request, {
-				action: 'invite',
-				channel: 'email',
-				recipient: 'decline-guest@example.com'
-			})
-		).status()
-	).toBe(200);
-	const declineMail = state().mail.find((row) => row.recipient === 'decline-guest@example.com');
-	const declineLink =
-		declineMail?.body.match(/http:\/\/localhost:5174\/invite\/[A-Za-z0-9_-]{43}/)?.[0] || '';
-	const declinePage = await stranger.newPage();
-	await declinePage.goto(`${declineLink}/decline`);
-	await capture(declinePage, 'decline');
-	await declinePage.getByRole('button', { name: 'stop invitations' }).click();
-	await expect(declinePage.getByRole('heading', { name: 'request acknowledged.' })).toBeVisible();
-	await capture(declinePage, 'decline-done');
-	expect((await stranger.request.get(declineLink)).status()).toBe(410);
-	const shared = `${app}/join/${state().teams.find((team) => team.name === name)?.link_token}`;
-	const anonymous = await browser.newContext({ baseURL: app });
-	const invitePage = await anonymous.newPage();
-	await invitePage.goto(shared);
-	await capture(invitePage, 'invite-anonymous');
-	const returnPath = new URL(shared).pathname;
-	await expect(invitePage.getByRole('link', { name: 'sign in with hack club' })).toHaveAttribute(
-		'href',
-		`/auth/login?next=${encodeURIComponent(returnPath)}`
-	);
-	expect(
-		(await signIn(anonymous.request, 'returning-guest', '', returnPath)).headers().location
-	).toBe(returnPath);
-	await invitePage.goto(shared);
-	await capture(invitePage, 'invite-signed-in');
-	expect((await post(sender.request, { action: 'rotate' })).status()).toBe(200);
-	expect((await anonymous.request.get(shared)).status()).toBe(410);
-	await invitePage.goto(shared);
-	await capture(invitePage, 'expired-invite');
-	expect(state().people.find((person) => person.id === 'ident!email-guest')?.team_id).toBeTruthy();
-	for (const context of [sender, stranger, guest, slackGuest, anonymous]) await context.close();
-});
-
-test('email caps are lifetime and per-team while slack retains the combined quotas', async ({
-	browser
-}) => {
-	const captain = await actorContext(browser, 'limit-captain');
-	expect((await create(captain.request, 'quota department')).status()).toBe(200);
-	const emails = await Promise.all(
-		Array.from({ length: 6 }, (_, index) =>
-			post(captain.request, {
-				action: 'invite',
-				channel: 'email',
-				recipient: `quota-${index}@example.com`
-			})
-		)
-	);
-	expect(emails.filter((response) => response.status() === 200)).toHaveLength(5);
-	expect(emails.filter((response) => response.status() === 429)).toHaveLength(1);
-	const messages = await Promise.all(
-		Array.from({ length: 6 }, (_, index) =>
-			post(captain.request, {
-				action: 'invite',
-				channel: 'slack',
-				recipient: `ULIMIT00${String(index).padStart(2, '0')}`
-			})
-		)
-	);
-	expect(messages.filter((response) => response.status() === 200)).toHaveLength(5);
-	expect(messages.filter((response) => response.status() === 429)).toHaveLength(1);
-	const delivered = state();
-	expect(delivered.mail.filter((row) => row.recipient.startsWith('quota-'))).toHaveLength(5);
-	expect(delivered.slack.filter((row) => row.channel.startsWith('DLIMIT'))).toHaveLength(5);
-	const other = await actorContext(browser, 'other-captain');
-	expect((await create(other.request, 'other quota department')).status()).toBe(200);
-	const previous =
-		delivered.mail.find((row) => row.recipient.startsWith('quota-'))?.recipient || '';
-	expect(
-		(
-			await post(other.request, { action: 'invite', channel: 'email', recipient: previous })
-		).status()
-	).toBe(429);
-	expect(
-		(
-			await post(other.request, {
-				action: 'invite',
-				channel: 'email',
-				recipient: 'a@example.com\r\nbcc:evil@example.com'
-			})
-		).status()
 	).toBe(400);
-	// Quotas remain in the real durable store; rolling windows are not memory counters.
-	const sql = new DatabaseSync('../.amp/in/test.sqlite');
-	sql
-		.prepare('UPDATE limits SET at = at - ? WHERE bucket LIKE ?')
-		.run(3600_001, 'sender:ident!limit-captain');
-	sql.close();
-	// Team quota still blocks after the sender's hour is over.
-	expect(
-		(
-			await post(captain.request, {
-				action: 'invite',
-				channel: 'email',
-				recipient: 'still-blocked@example.com'
-			})
-		).status()
-	).toBe(429);
-	const team = state().teams.find((team) => team.name === 'quota department');
-	const clock = new DatabaseSync('../.amp/in/test.sqlite');
-	// Advance the rolling sender/team hour, but keep all five emails inside their 24-hour window.
-	clock
-		.prepare('UPDATE limits SET at = at - ? WHERE bucket IN (?, ?)')
-		.run(3600_001, 'sender:ident!limit-captain', `team:${team?.id}`);
-	expect(
-		(
-			await post(captain.request, {
-				action: 'invite',
-				channel: 'email',
-				recipient: 'sixth@example.com'
-			})
-		).status()
-	).toBe(429);
-	expect(
-		(
-			await post(captain.request, { action: 'invite', channel: 'slack', recipient: 'UAFTER0001' })
-		).status()
-	).toBe(200);
-	// Exactly one email falls outside the rolling day, freeing exactly one slot.
-	clock
-		.prepare(`UPDATE email_recipients SET at = ? WHERE recipient = (
-		SELECT recipient FROM email_recipients WHERE team_id = ? ORDER BY at LIMIT 1
-	)`)
-		.run(Date.now() - 86400_001, team?.id);
-	expect(
-		(
-			await post(captain.request, {
-				action: 'invite',
-				channel: 'email',
-				recipient: 'sixth@example.com'
-			})
-		).status()
-	).toBe(200);
-	expect(
-		(
-			await post(captain.request, {
-				action: 'invite',
-				channel: 'email',
-				recipient: 'seventh@example.com'
-			})
-		).status()
-	).toBe(429);
-	const successor = await actorContext(browser, 'replacement-captain');
-	expect((await post(successor.request, {}, `/join/${team?.link_token}`)).status()).toBe(303);
-	expect(
-		(
-			await post(captain.request, { action: 'transfer', member: 'ident!replacement-captain' })
-		).status()
-	).toBe(200);
-	expect(
-		(
-			await post(successor.request, {
-				action: 'invite',
-				channel: 'email',
-				recipient: 'new-captain@example.com'
-			})
-		).status()
-	).toBe(429);
-	// Lifetime protection must outlast both rolling counters and retained invitation tokens.
-	clock.prepare('UPDATE limits SET at = at - ?').run(8 * 86400_000);
-	clock.prepare('UPDATE email_recipients SET at = at - ?').run(8 * 86400_000);
-	clock.prepare("DELETE FROM invitations WHERE channel = 'email'").run();
-	clock.close();
-	expect(
-		(
-			await post(other.request, {
-				action: 'invite',
-				channel: 'email',
-				recipient: `  ${previous.toUpperCase()}  `
-			})
-		).status()
-	).toBe(429);
-	expect(state().mail.filter((row) => row.recipient === previous)).toHaveLength(1);
+	await page.goto(oldLink);
+	await capture(page, 'expired-invite');
 	await captain.close();
-	await other.close();
-	await successor.close();
+	await anonymous.close();
 });
 
-test('unverified and ineligible captains can register but cannot send; users cannot join two teams', async ({
-	browser
+async function command(
+	request: APIRequestContext,
+	user: string,
+	channel: string,
+	options: { timestamp?: number; invalid?: boolean; workspace?: string; trigger?: string } = {}
+) {
+	const timestamp = String(options.timestamp ?? Math.floor(Date.now() / 1000));
+	const body = new URLSearchParams({
+		command: '/hcav',
+		text: 'hq',
+		user_id: user,
+		channel_id: channel,
+		team_id: options.workspace || 'TTEST00001',
+		trigger_id: options.trigger || `${Date.now()}-${channel}`
+	}).toString();
+	const signature = `v0=${createHmac(
+		'sha256',
+		options.invalid ? 'wrong-secret' : 'test-signing-secret'
+	)
+		.update(`v0:${timestamp}:${body}`)
+		.digest('hex')}`;
+	return request.post('/slack/command', {
+		data: body,
+		headers: {
+			'Content-Type': 'application/x-www-form-urlencoded',
+			'x-slack-request-timestamp': timestamp,
+			'x-slack-signature': signature
+		},
+		maxRedirects: 0
+	});
+}
+
+test('signed slack hq commands enforce captain authority, deduplicate and add current and future members', async ({
+	browser,
+	request
 }) => {
-	let firstLink = '';
-	const contexts: BrowserContext[] = [];
-	for (const actor of ['unverified-captain', 'adult', 'email-unverified']) {
-		const context = await actorContext(browser, actor);
-		contexts.push(context);
-		expect((await create(context.request, `${actor} team`)).status()).toBe(200);
+	const captain = await actorContext(browser, 'hq-captain');
+	expect((await create(captain.request, 'the hq department')).status()).toBe(200);
+	const guest = await actorContext(browser, 'hq-guest');
+	expect((await post(guest.request, {}, `/join/${team('hq-captain').link_token}`)).status()).toBe(
+		303
+	);
+	const user = person('hq-captain').slack_id;
+	expect((await command(request, user, 'CPUBLIC001', { invalid: true })).status()).toBe(401);
+	expect(
+		(
+			await command(request, user, 'CPUBLIC001', { timestamp: Math.floor(Date.now() / 1000) - 301 })
+		).status()
+	).toBe(401);
+	expect((await command(request, user, 'CPUBLIC001', { workspace: 'TOTHER001' })).status()).toBe(
+		403
+	);
+	expect((await command(request, person('hq-guest').slack_id, 'CPUBLIC001')).status()).toBe(200);
+	await expect
+		.poll(
+			() =>
+				state().slack.some(
+					(row) =>
+						row.method === 'chat.postEphemeral' &&
+						row.user === person('hq-guest').slack_id &&
+						row.text?.includes('Only your team captain')
+				),
+			{ timeout: 15_000 }
+		)
+		.toBe(true);
+	expect(team('hq-captain').hq_channel_id).toBeUndefined();
+	const replay = { timestamp: Math.floor(Date.now() / 1000), trigger: 'same-slack-delivery' };
+	const started = Date.now();
+	expect((await command(request, user, 'CPUBLIC001', replay)).status()).toBe(200);
+	expect(Date.now() - started).toBeLessThan(3000);
+	expect((await command(request, user, 'CPUBLIC001', replay)).status()).toBe(200);
+	await expect.poll(() => team('hq-captain').hq_channel_id, { timeout: 15_000 }).toBe('CPUBLIC001');
+	await expect
+		.poll(
+			() =>
+				state().slack.filter(
+					(row) => row.method === 'conversations.invite' && row.channel === 'CPUBLIC001'
+				).length,
+			{ timeout: 60_000 }
+		)
+		.toBe(2);
+	expect(
+		state().slack.filter(
+			(row) =>
+				row.method === 'chat.postEphemeral' && row.user === user && row.channel === 'CPUBLIC001'
+		)
+	).toHaveLength(1);
+	const future = await actorContext(browser, 'hq-future');
+	expect((await post(future.request, {}, `/join/${team('hq-captain').link_token}`)).status()).toBe(
+		303
+	);
+	await expect
+		.poll(
+			() =>
+				state().slack.some(
+					(row) =>
+						row.method === 'conversations.invite' &&
+						row.channel === 'CPUBLIC001' &&
+						row.users === person('hq-future').slack_id
+				),
+			{ timeout: 30_000 }
+		)
+		.toBe(true);
+	for (const channel of ['C0BQ2GV0H0E', 'C0CB9NR1N3W'])
 		expect(
-			(
-				await post(context.request, {
-					action: 'invite',
-					channel: 'email',
-					recipient: `${actor}-friend@example.com`
-				})
-			).status()
-		).toBe(403);
-		const value = state().teams.find((team) => team.captain_id === `ident!${actor}`);
-		if (!firstLink) firstLink = `/join/${value?.link_token}`;
-		else expect((await post(context.request, {}, firstLink)).status()).toBe(409);
-	}
-	for (const context of contexts) await context.close();
+			state().slack.some(
+				(row) =>
+					row.method === 'conversations.invite' && row.channel === channel && row.users === user
+			)
+		).toBe(true);
+	expect((await command(request, user, 'GPRIVATE01')).status()).toBe(200);
+	await expect.poll(() => team('hq-captain').hq_channel_id, { timeout: 15_000 }).toBe('GPRIVATE01');
+	await expect
+		.poll(
+			() =>
+				state().slack.filter(
+					(row) => row.method === 'conversations.invite' && row.channel === 'GPRIVATE01'
+				).length,
+			{ timeout: 30_000 }
+		)
+		.toBe(3);
+	const page = await captain.newPage();
+	await page.goto('/team');
+	await expect(page.getByRole('link', { name: '#private-hq', exact: true })).toBeVisible();
+	await capture(page, 'team-hq');
+	expect((await command(request, user, 'CNOBOT0001')).status()).toBe(200);
+	await expect
+		.poll(
+			() =>
+				state().slack.some(
+					(row) =>
+						row.method === 'chat.postEphemeral' &&
+						row.channel === 'CNOBOT0001' &&
+						row.text?.startsWith('Invite The Organization')
+				),
+			{ timeout: 15_000 }
+		)
+		.toBe(true);
+	expect(team('hq-captain').hq_channel_id).toBe('GPRIVATE01');
+	for (const context of [captain, guest, future]) await context.close();
 });
 
-test('teams can grow beyond an airtable page without exposing member email addresses', async ({
+test('hq requires the captain to be the channel creator', async ({ browser, request }) => {
+	const captain = await actorContext(browser, 'creator-captain');
+	expect((await create(captain.request, 'channel authority')).status()).toBe(200);
+	const user = person('creator-captain').slack_id;
+	expect((await command(request, user, 'CCREATOR01')).status()).toBe(200);
+	await expect
+		.poll(() => team('creator-captain').hq_channel_id, { timeout: 15_000 })
+		.toBe('CCREATOR01');
+	for (const channel of ['COTHER0001', 'CUNKNOWN01']) {
+		expect((await command(request, user, channel)).status()).toBe(200);
+		await expect
+			.poll(
+				() =>
+					state().slack.some(
+						(row) =>
+							row.method === 'chat.postEphemeral' &&
+							row.channel === channel &&
+							row.user === user &&
+							row.text === 'You must have created this Slack channel to set it as HQ.'
+					),
+				{ timeout: 15_000 }
+			)
+			.toBe(true);
+		expect(team('creator-captain').hq_channel_id).toBe('CCREATOR01');
+		expect(
+			state().slack.some((row) => row.method === 'conversations.invite' && row.channel === channel)
+		).toBe(false);
+	}
+	await captain.close();
+});
+
+test('channel failures preserve team membership and can be retried without sending dms', async ({
+	browser,
+	request
+}) => {
+	const captain = await actorContext(browser, 'retry-captain');
+	expect((await create(captain.request, 'retry team')).status()).toBe(200);
+	expect((await command(request, person('retry-captain').slack_id, 'CRETRY0001')).status()).toBe(
+		200
+	);
+	const page = await captain.newPage();
+	await expect
+		.poll(
+			async () => {
+				await page.goto('/team');
+				await page.getByText('Slack channel status', { exact: true }).click();
+				return page.locator('main').innerText();
+			},
+			{ timeout: 30_000, intervals: [1500] }
+		)
+		.toContain('ratelimited');
+	expect(person('retry-captain').team_id).toBe(team('retry-captain').id);
+	await capture(page, 'channel-failure');
+	await page.getByRole('button', { name: 'Retry channel additions' }).click();
+	await expect(page.getByRole('status')).toContainText('queued');
+	await expect
+		.poll(
+			async () => {
+				await page.reload();
+				const details = page
+					.locator('details')
+					.filter({ has: page.getByText('Slack channel status', { exact: true }) });
+				await details.evaluate((node) => {
+					(node as HTMLDetailsElement).open = true;
+				});
+				return details.innerText();
+			},
+			{ timeout: 30_000, intervals: [1500] }
+		)
+		.toContain('#team hq: added');
+	expect((await post(captain.request, { action: 'retry-channels' })).status()).toBe(429);
+	await capture(page, 'channel-recovered');
+	expect(
+		state().slack.every((row) =>
+			['conversations.invite', 'chat.postEphemeral'].includes(row.method)
+		)
+	).toBe(true);
+	await captain.close();
+});
+
+test('teams span airtable pages without exposing member emails or legal names', async ({
 	browser
 }) => {
 	const context = await actorContext(browser, 'large-newcomer');
 	expect((await post(context.request, {}, `/join/${'L'.repeat(43)}`)).status()).toBe(303);
 	const page = await context.newPage();
 	await page.goto('/team');
-	await expect(page.getByRole('heading', { name: 'the personnel (105)' })).toBeVisible();
-	await expect(page.getByText('large member 103', { exact: true })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'The team (105)' })).toBeVisible();
+	await expect(page.getByText('large member 103 on slack', { exact: true })).toBeVisible();
 	expect(await page.content()).not.toContain('private-member-103@example.com');
+	expect(await page.content()).not.toContain('private legal name');
 	await context.close();
 });

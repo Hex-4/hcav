@@ -17,12 +17,13 @@ import Faq from '#lib/Faq.svelte';
 <Faq question="What is HCAV?">
 	<p>
 		The world's second best scavenger hunt. One weekend of doing stupid shit for imaginary points,
-		for the cracked teenagers at Hack Club that have nothing better to do.
+		for the cracked teenagers at <a href="https://hackclub.com">Hack Club</a> that have nothing
+		better to do.
 	</p>
 </Faq>
 
 <Faq question="When is it happening?">
-	<p>Friday October 30 to Monday November 1. Unfortunately.</p>
+	<p>Friday October 30 to Monday November 2. Unfortunately.</p>
 </Faq>
 
 <Faq question="Who can participate?">
@@ -143,16 +144,16 @@ import Faq from '#lib/Faq.svelte';
 	<p>You can certainly try.</p>
 </Faq>
 
+<Faq question="Can I use AI to help complete Items?">
+	<p>No. It's more fun that way. If you disagree, please refer to "Can I bribe the Organizers?"</p>
+</Faq>
+
 <Faq question="Who writes the list?">
 	<p>The Organization.</p>
 </Faq>
 
 <Faq question="Who is The Organization?">
 	<p>We are.</p>
-</Faq>
-
-<Faq question="Who's already signed up?">
-	<p>The following teams have bravely had their Captains sign up:</p>
 </Faq>
 
 <Faq question="Wait, if this is the second best scavenger hunt in the world, what's the first?">
@@ -190,13 +191,18 @@ import Faq from '#lib/Faq.svelte';
 </Faq>
 
 <Faq question="Any advice?">
-<p>Crimes are only illegal if you don't get caught.</p>
+	<p>Crimes are only illegal if you don't get caught.</p>
 </Faq>
 
 <Faq question="How do you pronounce HCAV?">
-<p>However your heart desires.</p>
+	<p>However your heart desires.</p>
 </Faq>
 
 <Faq question="Is that everything?">
-<p>No.</p>
+	<p>No.</p>
 </Faq>
+
+<div class="mt-6 flex flex-wrap gap-3">
+	<form action="/team"><button type="submit">Make a team</button></form>
+	<form action="/teams"><button type="submit">Find a team</button></form>
+</div>

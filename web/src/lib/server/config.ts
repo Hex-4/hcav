@@ -6,7 +6,7 @@ export function setting(name: string): string {
 
 export function required(name: string): string {
 	const value = setting(name);
-	if (!value) error(503, 'this service is not configured yet. please try again later.');
+	if (!value) error(503, 'This service is not configured yet. Please try again later.');
 	return value;
 }
 

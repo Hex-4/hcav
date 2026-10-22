@@ -1,7 +1,7 @@
 import { fail, isHttpError, redirect } from '@sveltejs/kit';
 import { requireUser } from '#lib/server/auth';
 import { resolveShared } from '#lib/server/invites';
-import { exclusive } from '#lib/server/store';
+import { exclusive, reserve } from '#lib/server/store';
 import { currentTeam, joinTeam } from '#lib/server/teams';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -17,6 +17,7 @@ export const load: PageServerLoad = async ({ params, locals }) => {
 export const actions: Actions = {
 	default: async (event) => {
 		const identity = requireUser(event);
+		reserve([{ key: `join:${identity.id}`, window: 60_000, max: 10 }]);
 		try {
 			await exclusive(async () => {
 				const value = await resolveShared(event.params.token);

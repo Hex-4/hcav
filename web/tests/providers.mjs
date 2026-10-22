@@ -1,12 +1,23 @@
 // Only loaded by the test runner, never imported by the app or copied into its image.
 // Real app routes, real oidc validation and sqlite; external services are deterministic doubles.
-import { generateKeyPairSync, sign } from 'node:crypto';
+import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 
 mkdirSync('../.amp/in', { recursive: true });
 for (const suffix of ['', '-wal', '-shm'])
 	rmSync(`../.amp/in/test.sqlite${suffix}`, { force: true });
-const state = { people: [], teams: [], mail: [], slack: [] };
+const state = { people: [], teams: [], slack: [] };
+const slackActors = new Map();
+function slackId(actor) {
+	if (actor === 'no-slack') return '';
+	const id = `U${createHash('sha256')
+		.update(actor.startsWith('duplicate-') ? 'duplicate' : actor)
+		.digest('hex')
+		.slice(0, 10)
+		.toUpperCase()}`;
+	slackActors.set(id, actor);
+	return id;
+}
 state.teams.push({
 	id: 'large-team',
 	name: 'no maximum occupancy',
@@ -18,10 +29,27 @@ for (let index = 0; index < 104; index++) {
 	state.people.push({
 		id: index === 0 ? 'ident!large-captain' : `ident!large-member-${index}`,
 		name: `large member ${index}`,
+		slack_id: slackId(`large member ${index}`),
 		email: `private-member-${index}@example.com`,
 		team_id: 'large-team'
 	});
 }
+for (let index = 0; index < 6; index++)
+	state.teams.push({
+		id: `directory-${index}`,
+		name: `directory team ${index}`,
+		captain_id: `ident!directory-${index}`,
+		open_registration: index % 2 === 0,
+		link_token: String(index).repeat(43),
+		link_expires: new Date(Date.now() + 86400_000).toISOString()
+	});
+state.teams.push({
+	id: 'expired',
+	name: 'expired team',
+	captain_id: 'ident!expired',
+	link_token: 'E'.repeat(43),
+	link_expires: new Date(Date.now() - 1000).toISOString()
+});
 const persist = () => writeFileSync('../.amp/in/test-providers.json', JSON.stringify(state));
 persist();
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -58,10 +86,10 @@ globalThis.fetch = async (input, options) => {
 			);
 			const info = {
 				sub: `ident!${actor}`,
-				name: actor.replaceAll('-', ' '),
+				name: `private legal name ${actor}`,
 				email: `${actor}@example.com`,
 				email_verified: actor !== 'email-unverified',
-				slack_id: actor === 'slack-guest' ? 'UFRIEND001' : 'USENDER001',
+				slack_id: slackId(actor),
 				verification_status: actor.startsWith('unverified') ? 'pending' : 'verified',
 				ysws_eligible: actor !== 'adult'
 			};
@@ -89,7 +117,7 @@ globalThis.fetch = async (input, options) => {
 	}
 	if (url.origin === 'https://api.airtable.com') {
 		const table = decodeURIComponent(url.pathname.split('/').at(-1));
-		if (!['people', 'teams', 'mail'].includes(table)) throw new Error('unexpected airtable table');
+		if (!['people', 'teams'].includes(table)) throw new Error('unexpected airtable table');
 		if (request.method === 'PATCH') {
 			for (const { fields } of (await request.json()).records) {
 				let row = state[table].find((item) => item.id === fields.id);
@@ -104,26 +132,59 @@ globalThis.fetch = async (input, options) => {
 		}
 		const expression = url.searchParams.get('filterByFormula');
 		const match = /^\{(\w+)\}='((?:\\.|[^'])*)'$/.exec(expression || '');
-		if (!match) throw new Error(`unsupported fixture formula: ${expression}`);
-		const value = match[2].replace(/\\(.)/g, '$1');
-		const rows = state[table].filter((item) => item[match[1]] === value);
+		if (expression && !match) throw new Error(`unsupported fixture formula: ${expression}`);
+		const value = match?.[2].replace(/\\(.)/g, '$1');
+		const rows = match ? state[table].filter((item) => item[match[1]] === value) : state[table];
 		const start = Number(url.searchParams.get('offset') || 0);
 		const records = rows
 			.slice(start, start + 100)
 			.map((fields) => ({ id: `rec${fields.id}`, fields }));
 		return json({ records, ...(rows.length > start + 100 ? { offset: String(start + 100) } : {}) });
 	}
+	if (url.origin === 'https://cachet.dunkirk.sh') {
+		const actor = slackActors.get(url.pathname.split('/').at(-1));
+		if (actor === 'cache-down') return json({}, 503);
+		return json({
+			displayName: actor === 'blank-name' ? '' : `${actor} on slack`,
+			realName: 'private cachet real name',
+			imageUrl: 'https://avatars.slack-edge.com/test.png'
+		});
+	}
 	if (url.origin === 'https://slack.com') {
 		const method = url.pathname.split('/').at(-1);
 		const body = await request.json();
 		if (method === 'auth.test') return json({ ok: true, team_id: 'TTEST00001' });
-		if (method === 'users.info')
-			return json({ ok: true, user: { team_id: 'TTEST00001', is_bot: false, deleted: false } });
-		if (method === 'conversations.open')
-			return json({ ok: true, channel: { id: `D${body.users.slice(1)}` } });
-		if (method === 'chat.postMessage') {
-			state.slack.push(body);
+		if (method === 'conversations.info')
+			return json({
+				ok: true,
+				channel: {
+					id: body.channel,
+					name: body.channel === 'GPRIVATE01' ? 'private-hq' : 'team-hq',
+					creator: slackId(
+						body.channel === 'CRETRY0001'
+							? 'retry-captain'
+							: body.channel === 'CCREATOR01'
+								? 'creator-captain'
+								: ['CPUBLIC001', 'GPRIVATE01', 'CNOBOT0001'].includes(body.channel)
+									? 'hq-captain'
+									: body.channel === 'CUNKNOWN01'
+										? 'no-slack'
+										: 'other-creator'
+					),
+					is_member: body.channel !== 'CNOBOT0001',
+					is_archived: false
+				}
+			});
+		if (method === 'conversations.invite' || method === 'chat.postEphemeral') {
+			const previous = state.slack.filter(
+				(row) => row.method === method && row.channel === body.channel && row.users === body.users
+			).length;
+			state.slack.push({ method, ...body });
 			persist();
+			if (method === 'conversations.invite' && body.channel === 'CRETRY0001' && previous === 0)
+				return json({ ok: false, error: 'ratelimited' });
+			if (method === 'conversations.invite' && previous > 0)
+				return json({ ok: false, error: 'already_in_channel' });
 			return json({ ok: true });
 		}
 		throw new Error(`unexpected test slack method: ${method}`);

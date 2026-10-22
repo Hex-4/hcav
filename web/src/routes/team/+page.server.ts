@@ -1,8 +1,8 @@
 import { error, fail, isHttpError, redirect } from '@sveltejs/kit';
 import { upsert } from '#lib/server/airtable';
 import { requireUser } from '#lib/server/auth';
-import { origin, setting } from '#lib/server/config';
-import { sendInvitation } from '#lib/server/invites';
+import { origin } from '#lib/server/config';
+import { channelStatus, queueChannels } from '#lib/server/slack';
 import { exclusive, hash, reserve } from '#lib/server/store';
 import {
 	captain,
@@ -20,18 +20,20 @@ export const load: PageServerLoad = async (event) => {
 	const identity = requireUser(event);
 	const value = await currentTeam(identity);
 	return {
-		team: value ? { id: value.id, name: value.name, captainId: value.captain_id } : null,
+		team: value
+			? {
+					id: value.id,
+					name: value.name,
+					captainId: value.captain_id,
+					open: value.open_registration === true,
+					hqId: value.hq_channel_id || '',
+					hqName: value.hq_channel_name || ''
+				}
+			: null,
 		members: value ? await roster(value.id) : [],
 		inviteLink: value ? `${origin()}/join/${value.link_token}` : '',
-		linkExpires: value?.link_expires || '',
-		canSend:
-			identity.verified &&
-			identity.eligible &&
-			identity.emailVerified &&
-			Date.now() - identity.authAt < 86400_000,
-		canSlack: Boolean(identity.slackId),
-		messagesEnabled: setting('INVITES_ENABLED') === 'true',
-		emailEnabled: setting('EMAIL_INVITES_ENABLED') === 'true'
+		linkExpired: value ? !(Date.parse(value.link_expires) > Date.now()) : false,
+		channels: channelStatus(identity.slackId, value?.hq_channel_id)
 	};
 };
 
@@ -55,6 +57,11 @@ export const actions: Actions = {
 						await upsert('teams', { id: value.id, name: teamName(form.get('name')) });
 						break;
 					}
+					case 'registration': {
+						const value = await captain(identity);
+						await upsert('teams', { id: value.id, open_registration: form.get('open') === 'on' });
+						break;
+					}
 					case 'leave':
 						await leaveTeam(identity);
 						break;
@@ -67,29 +74,23 @@ export const actions: Actions = {
 					case 'rotate':
 						await rotateLink(identity);
 						break;
-					case 'invite':
-						await sendInvitation(
-							identity,
-							String(form.get('channel')),
-							String(form.get('recipient') || ''),
-							event.getClientAddress()
-						);
+					case 'retry-channels': {
+						reserve([{ key: `channel-retry:${identity.id}`, window: 60_000, max: 1 }]);
+						await queueChannels(identity.slackId, (await currentTeam(identity))?.id, true);
 						break;
+					}
 					default:
-						error(400, 'unknown request.');
+						error(400, 'Unknown request.');
 				}
 			});
 		} catch (cause) {
-			if (isHttpError(cause)) return fail(cause.status, { message: cause.body.message, ok: false });
+			if (isHttpError(cause)) return fail(cause.status, { message: cause.body.message });
 			throw cause;
 		}
 		if (action === 'leave') redirect(303, '/team');
 		return {
-			ok: true,
 			message:
-				action === 'invite'
-					? 'invitation request recorded. if delivery is available, your friend will receive it. please do not resend.'
-					: 'the paperwork is in order.'
+				action === 'retry-channels' ? 'Channel additions queued. Check back in a moment.' : 'Saved.'
 		};
 	}
 };

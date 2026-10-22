@@ -23,8 +23,7 @@ export default defineConfig({
 			HCA_CLIENT_SECRET: 'test-secret',
 			SLACK_BOT_TOKEN: 'test-only',
 			SLACK_TEAM_ID: 'TTEST00001',
-			INVITES_ENABLED: 'true',
-			EMAIL_INVITES_ENABLED: 'true',
+			SLACK_SIGNING_SECRET: 'test-signing-secret',
 			SQLITE_PATH: '../.amp/in/test.sqlite'
 		}
 	}

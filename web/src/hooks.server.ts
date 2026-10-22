@@ -1,15 +1,19 @@
 import { error } from '@sveltejs/kit';
 import type { Handle, HandleServerError } from '@sveltejs/kit/hooks';
 import { cookieName, origin } from '#lib/server/config';
+import { startSlackWorker } from '#lib/server/slack';
 import { cleanup, hash, reserve, session } from '#lib/server/store';
+
+startSlackWorker();
 
 let lastCleanup = 0;
 export const handle: Handle = async ({ event, resolve }) => {
 	if (!['GET', 'HEAD', 'OPTIONS'].includes(event.request.method)) {
-		if (event.request.headers.get('origin') !== origin())
-			error(403, 'this request must come from hcav.');
+		// Slack authenticates this one endpoint with an HMAC over the raw body.
+		if (event.url.pathname !== '/slack/command' && event.request.headers.get('origin') !== origin())
+			error(403, 'This request must come from HCAV.');
 		if (Number(event.request.headers.get('content-length')) > 16_384)
-			error(413, 'that form is too large.');
+			error(413, 'That form is too large.');
 	}
 	if (Date.now() - lastCleanup > 3600_000) {
 		cleanup();
@@ -39,5 +43,5 @@ export const handleError: HandleServerError = ({ kind, error: cause }) => {
 	if (kind !== 'unknown') return;
 	console.error('unhandled request failure');
 	if (process.env.NODE_ENV !== 'production') console.error(cause);
-	return { message: 'something interrupted the paperwork. please try again shortly.' };
+	return { message: 'Something interrupted the paperwork. Please try again shortly.' };
 };

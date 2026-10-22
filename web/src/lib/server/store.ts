@@ -3,7 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { error } from '@sveltejs/kit';
-import { type Identity, inviteSeconds, setting } from './config';
+import { type Identity, setting } from './config';
 
 let connection: DatabaseSync;
 export function db() {
@@ -18,30 +18,17 @@ export function db() {
 			CREATE TABLE IF NOT EXISTS oauth (hash TEXT PRIMARY KEY, payload TEXT NOT NULL, expires INTEGER NOT NULL);
 			CREATE TABLE IF NOT EXISTS limits (bucket TEXT NOT NULL, at INTEGER NOT NULL);
 			CREATE INDEX IF NOT EXISTS limits_lookup ON limits(bucket, at);
-			CREATE TABLE IF NOT EXISTS invitations (
-				hash TEXT PRIMARY KEY, team_id TEXT NOT NULL, sender_id TEXT NOT NULL,
-				channel TEXT NOT NULL, recipient TEXT NOT NULL, expires INTEGER NOT NULL,
-				status TEXT NOT NULL DEFAULT 'reserved'
+			CREATE TABLE IF NOT EXISTS slack_commands (
+				id TEXT PRIMARY KEY, payload TEXT NOT NULL, at INTEGER NOT NULL,
+				attempts INTEGER NOT NULL DEFAULT 0, done INTEGER NOT NULL DEFAULT 0
 			);
-			CREATE TABLE IF NOT EXISTS suppressed (recipient TEXT PRIMARY KEY);
-			CREATE TABLE IF NOT EXISTS email_recipients (
-				recipient TEXT PRIMARY KEY, team_id TEXT NOT NULL, at INTEGER NOT NULL
+			CREATE TABLE IF NOT EXISTS channel_jobs (
+				user_id TEXT NOT NULL, channel_id TEXT NOT NULL, team_id TEXT NOT NULL,
+				at INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+				status TEXT NOT NULL DEFAULT 'pending', problem TEXT NOT NULL DEFAULT '',
+				PRIMARY KEY(user_id, channel_id)
 			);
-			CREATE INDEX IF NOT EXISTS email_team_lookup ON email_recipients(team_id, at);
 		`);
-		// Preserve existing email reservations when upgrading, before invitation cleanup runs.
-		const insert = connection.prepare('INSERT OR IGNORE INTO email_recipients VALUES (?, ?, ?)');
-		for (const row of connection
-			.prepare(
-				"SELECT recipient, team_id, expires FROM invitations WHERE channel = 'email' ORDER BY expires"
-			)
-			.all()) {
-			insert.run(
-				recipientKey('email', String(row.recipient).trim().toLowerCase()),
-				String(row.team_id),
-				Number(row.expires) - inviteSeconds * 1000
-			);
-		}
 	}
 	return connection;
 }
@@ -89,40 +76,21 @@ export function takeOAuth(value: string) {
 		: null;
 }
 
-// A rolling window, shared by every route and persisted across restarts.
-// All checks and reservations succeed together or none do.
-export function reserve(
-	buckets: { key: string; window: number; max: number }[],
-	email?: { recipient: string; teamId: string }
-) {
+// Checks and reservations succeed together. Rolling windows survive restarts.
+export function reserve(buckets: { key: string; window: number; max: number }[]) {
 	const sql = db();
 	const now = Date.now();
 	sql.exec('BEGIN IMMEDIATE');
 	try {
 		sql.prepare('DELETE FROM limits WHERE at <= ?').run(now - 7 * 86400_000);
-		if (email) {
-			const previous = sql
-				.prepare('SELECT 1 FROM email_recipients WHERE recipient = ?')
-				.get(email.recipient);
-			const daily = sql
-				.prepare('SELECT COUNT(*) AS count FROM email_recipients WHERE team_id = ? AND at > ?')
-				.get(email.teamId, now - 86400_000);
-			if (previous || Number(daily?.count) >= 5)
-				error(429, 'email invitation limit reached. share your team link instead.');
-		}
 		for (const bucket of buckets) {
 			const row = sql
 				.prepare('SELECT COUNT(*) AS count FROM limits WHERE bucket = ? AND at > ?')
 				.get(bucket.key, now - bucket.window);
-			if (Number(row?.count) >= bucket.max)
-				error(429, 'the organization needs a moment. please wait before trying again.');
+			if (Number(row?.count) >= bucket.max) error(429, 'Please wait a moment before trying again.');
 		}
 		const insert = sql.prepare('INSERT INTO limits VALUES (?, ?)');
 		for (const key of new Set(buckets.map((bucket) => bucket.key))) insert.run(key, now);
-		if (email)
-			sql
-				.prepare('INSERT INTO email_recipients VALUES (?, ?, ?)')
-				.run(email.recipient, email.teamId, now);
 		sql.exec('COMMIT');
 	} catch (cause) {
 		sql.exec('ROLLBACK');
@@ -130,26 +98,7 @@ export function reserve(
 	}
 }
 
-export type Invitation = {
-	hash: string;
-	team_id: string;
-	sender_id: string;
-	channel: 'email' | 'slack';
-	recipient: string;
-	expires: number;
-	status: string;
-};
-
-export function invitation(value: string): Invitation | undefined {
-	return db().prepare('SELECT * FROM invitations WHERE hash = ?').get(hash(value)) as
-		| Invitation
-		| undefined;
-}
-
-export const recipientKey = (channel: string, recipient: string) => hash(`${channel}:${recipient}`);
-
-// Airtable does not provide compare-and-swap. Run exactly one application process.
-// Serializing product mutations prevents concurrent join/create/transfer races.
+// Airtable has no compare-and-swap. Run exactly one application process.
 let tail = Promise.resolve();
 export async function exclusive<T>(work: () => Promise<T>): Promise<T> {
 	const previous = tail;
@@ -169,8 +118,7 @@ export function cleanup() {
 	const now = Date.now();
 	db().prepare('DELETE FROM sessions WHERE expires < ?').run(now);
 	db().prepare('DELETE FROM oauth WHERE expires < ?').run(now);
-	// Retain tokens for 30 days after expiry to allow recipient opt-out.
 	db()
-		.prepare('DELETE FROM invitations WHERE expires < ?')
-		.run(now - 30 * 86400_000);
+		.prepare('DELETE FROM slack_commands WHERE done = 1 AND at < ?')
+		.run(now - 86400_000);
 }

@@ -1,18 +1,34 @@
 {
 	"display_information": {
-		"name": "the organization",
-		"description": "hcav team invitations, by explicit request.",
+		"name": "The Organization",
+		"description": "HCAV team HQ setup and channel membership.",
 		"background_color": "#c73525"
 	},
 	"features": {
 		"bot_user": {
-			"display_name": "the organization",
+			"display_name": "The Organization",
 			"always_online": false
-		}
+		},
+		"slash_commands": [
+			{
+				"command": "/hcav",
+				"url": "https://hcav.hackclub.com/slack/command",
+				"description": "Set this channel as your team's HQ",
+				"usage_hint": "hq",
+				"should_escape": false
+			}
+		]
 	},
 	"oauth_config": {
 		"scopes": {
-			"bot": ["chat:write", "im:write", "users:read"]
+			"bot": [
+				"commands",
+				"chat:write",
+				"channels:read",
+				"groups:read",
+				"channels:write.invites",
+				"groups:write.invites"
+			]
 		}
 	},
 	"settings": {

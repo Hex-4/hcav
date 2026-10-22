@@ -19,6 +19,9 @@ export type Team = {
 	captain_id: string;
 	link_token: string;
 	link_expires: string;
+	open_registration?: boolean;
+	hq_channel_id?: string;
+	hq_channel_name?: string;
 };
 
 // Airtable allows five requests/second/base. Queue reads as well as writes.
@@ -48,12 +51,12 @@ async function request<T>(table: string, query = '', body?: object): Promise<T> 
 		);
 		if (!response.ok) {
 			console.error('airtable request failed', table, response.status);
-			error(503, 'the filing cabinet is unavailable. please try again shortly.');
+			error(503, 'The filing cabinet is unavailable. Please try again shortly.');
 		}
 		return await response.json();
 	} catch (cause) {
 		if (cause instanceof TypeError || (cause instanceof Error && cause.name === 'TimeoutError')) {
-			error(503, 'the filing cabinet is unavailable. please try again shortly.');
+			error(503, 'The filing cabinet is unavailable. Please try again shortly.');
 		}
 		throw cause;
 	} finally {
@@ -65,11 +68,13 @@ function literal(value: string) {
 	return `'${value.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}'`;
 }
 
-export async function rows<T>(table: string, field: string, value: string): Promise<T[]> {
+export async function rows<T>(table: string, field?: string, value = ''): Promise<T[]> {
 	const records: T[] = [];
 	let offset = '';
 	do {
-		const query = new URLSearchParams({ filterByFormula: `{${field}}=${literal(value)}` });
+		const query = new URLSearchParams(
+			field ? { filterByFormula: `{${field}}=${literal(value)}` } : {}
+		);
 		if (offset) query.set('offset', offset);
 		const page = await request<{ records: RecordRow<T>[]; offset?: string }>(table, `?${query}`);
 		records.push(...page.records.map((row) => row.fields));

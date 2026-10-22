@@ -23,50 +23,46 @@ http://localhost:5173/auth/callback
 https://hcav.hackclub.com/auth/callback
 ```
 
-the application requests `openid profile email slack_id verification_status`. confirm it can receive `sub`, `name`, `email`, `email_verified`, `slack_id`, `verification_status`, and `ysws_eligible` through authenticated userinfo. outbound messaging requires `verification_status: "verified"`, `ysws_eligible: true`, a verified email, and a sign-in within 24 hours. the provider's public verification check calls this combination `verified_eligible`; it is not the literal oidc claim used here. no identity documents are requested or stored.
+the application requests `openid profile email slack_id verification_status`. confirm it can receive `sub`, `email`, `email_verified`, `slack_id`, `verification_status`, and `ysws_eligible` through authenticated userinfo. new logins require a linked slack account; users without one must link it through hca before signing in. hca remains the login provider; there is no slack user-login oauth flow. no identity documents are requested or stored.
+
+public profiles use `displayName` and `imageUrl` from `https://cachet.dunkirk.sh/users/{id}`, with the linked slack id as `{id}`. fall back to the slack id when the public display name is unavailable; never display an hca legal name. `people.name` stores the public slack display name (or slack id fallback), and photos are fetched separately without adding a photo field to airtable.
 
 sign-in uses the authorization-code flow, client authentication, state, nonce, pkce parameters, and signed id-token validation. provider-side enforcement of pkce must not be assumed; client authentication, state, nonce and token validation remain required.
 
 ## airtable setup
 
-set `AIRTABLE_TOKEN` and `AIRTABLE_BASE_ID`. the token needs access to the chosen base and `data.records:read`, `data.records:write`, and `schema.bases:read`; initial schema creation also needs `schema.bases:write`.
+set `AIRTABLE_TOKEN` and `AIRTABLE_BASE_ID`. the token needs access to the chosen base and `data.records:read`, `data.records:write`, and `schema.bases:read`; creating tables or adding fields also needs `schema.bases:write`.
 
 ```sh
 bun run airtable:setup          # inspect only; makes no changes
-bun run airtable:setup --apply  # explicitly create the three missing tables
+bun run airtable:setup --apply  # create missing tables and add missing fields
 ```
 
-the script never deletes or changes existing tables. the exact field names/types are defined in `scripts/airtable-setup.mjs`. `people` holds account profiles and membership, `teams` holds names/captains/shared invitation links, and `mail` is the outbound email queue. ids are text primary fields. do not manually duplicate ids or edit membership while the application is processing requests.
+the script inspects without `--apply`. with `--apply`, it creates missing `people` and `teams` tables and adds missing fields to existing tables. it validates all existing field types before writing, rejects type mismatches, and never modifies or deletes existing fields. the exact field names/types are defined in `scripts/airtable-setup.mjs`. `people` keeps its existing schema for profiles and membership. `teams` holds names/captains/shared invitation links and gains `open_registration` (checkbox), `hq_channel_id` (singleLineText), and `hq_channel_name` (singleLineText). new teams are closed by default. ids are text primary fields. do not manually duplicate ids or edit membership while the application is processing requests.
 
-### email automation
+### migration from email delivery
 
-create an airtable automation on `mail` when a record matches `status = ready`:
-
-1. send an email to the record's `recipient`, using `subject` and the complete plain-text `body` (preserve both invitation and opt-out links).
-2. update that same record's `status` to `sent` after successful delivery.
-
-use an approved sender and verify your airtable plan's external-recipient permissions and sending allowance. test with your own email before opening dispatch. do not manually replay records or automatically retry ambiguous sends: delivery may have succeeded before a timeout. inspect the sender's delivery history first. queue records can contain personal information and should not be shared publicly.
-
-once tested, set `EMAIL_INVITES_ENABLED=true` and `INVITES_ENABLED=true`. until then, copyable team links still work. the app records delivery submission, not inbox delivery. airtable email delivery itself is an external automation and has to be tested separately.
+the app no longer sends email or slack dm invitations. the setup script neither requires nor creates `mail` and leaves any existing live `mail` table untouched. disable the old email automation before rollout and handle old `ready` rows manually after checking delivery history; do not replay them automatically. keep historical records private. remove the obsolete invitation feature flags from deployment configuration.
 
 ## slack bot setup
 
-create a slack app from `slack-manifest.json` and have a hack club workspace administrator install/approve it. the bot needs only `chat:write`, `im:write`, and `users:read`.
+create a slack app from `slack-manifest.json` and have a hack club workspace administrator install/approve it. the bot scopes are `commands`, `chat:write`, `channels:read`, `groups:read`, `channels:write.invites`, and `groups:write.invites`. install or reinstall the app after changing scopes; changing the manifest alone does not update an installed token's grants.
 
-provide `SLACK_BOT_TOKEN` (the installed bot's `xoxb-…` token) and `SLACK_TEAM_ID` (hack club's workspace id, starting with `T`) through the deployment's secret environment. no user token, signing secret, event subscription, interactivity endpoint, or socket-mode token is needed.
+provide `SLACK_BOT_TOKEN` (the installed bot's `xoxb-…` token), `SLACK_TEAM_ID` (hack club's workspace id, starting with `T`), and `SLACK_SIGNING_SECRET` through the deployment's secret environment. slash commands require signature and timestamp verification with the signing secret. no event subscription, interactivity endpoint, or socket-mode connection is needed.
 
-senders enter a member id or a `https://hackclub.slack.com/team/U…` profile link, not an arbitrary message or channel. the bot checks its own workspace and recipient membership before sending a fixed plain-text dm. bot/deactivated accounts are rejected. the sender must have a slack account linked through hca. enable `INVITES_ENABLED=true` after testing a real dm to your own account.
+configure `/hcav` with request url `https://hcav.hackclub.com/slack/command` and usage hint `hq`. invite the bot to `#hcav` (`C0BQ2GV0H0E`), `#hcav-submissions` (`C0CB9NR1N3W`), and every chosen team hq. a captain first invites the bot to an existing public or private channel, then runs `/hcav hq` inside that channel. the command confirms its outcome ephemerally and schedules channel additions through the persisted background queue.
+
+the captain must also be the channel's creator, checked using `conversations.info` with the existing bot token. if the creator does not match the captain's slack id, or slack does not provide a creator, hq selection is refused. no admin token, user token, or additional scope is needed.
+
+sqlite persists signed-command deduplication and channel-addition jobs with retries. joining registration adds members to the shared channels and their team's chosen hq. channel api errors do not roll back registration membership; the ui shows delivery state and a retry action. leaving a team or being removed never automatically removes anyone from slack channels. changing hq adds existing team members to the new hq without removing them from the old one.
 
 ## abuse controls and behavior
 
 - anyone signed in can create a team, join one, or share its link. there is no team-size limit, but each person can belong to only one team.
-- only the captain can rename, remove members, transfer captaincy, rotate links, or request email/slack invitations. a captain transfers their role before leaving.
-- messages use a fixed template, sanitized sender/team names, no custom content, and disabled slack parsing/unfurls. invitations identify the sender.
-- email has stricter limits: five requests per team per rolling 24 hours, and one request per normalized email address ever, across all senders and teams. permanent hashed recipient reservations survive invitation expiry, cleanup, and restarts. retain the sqlite database when deploying or moving bases; deleting it resets this history. aliases are not consolidated. existing local email invitation records are backfilled on startup.
-- email and slack also share rolling sender/team budgets: 10/hour and 40/day. ip budgets are 30/hour and 80/day; deployment-wide budgets are 100/hour and 250/day. slack destinations get at most 1/day and 3/week across all senders. reservations are atomic and survive restarts; failed/ambiguous sends consume quota too. these limits govern app queue creation, not manual airtable sends or automation replays.
+- only the captain can rename, remove members, transfer captaincy, rotate/revoke links, change open registration, or select an hq. a captain transfers their role before leaving.
+- `/teams` requires authentication and lists teams in random order with open teams first. the server rechecks open registration at join time rather than trusting the listing or browser. new teams are closed by default; bearer invitations still work for closed teams.
+- the only invitation mechanism is a bearer `/join/{token}` link, valid for 14 days and revocable by the captain. anyone holding it can use it, so share privately. rotating a link invalidates the previous link without removing existing members.
 - the app also limits general requests, login attempts, joins, and mutations. configure trusted client-ip forwarding correctly before launch; never trust a client-supplied forwarding header directly.
-- each message has an explicit-confirmation opt-out link. suppressed recipients get no new messages; the sender sees the same generic response. already queued email may still arrive.
-- targeted links require the exact verified email or linked slack identity. shared links are bearer invitations. both expire after 14 days; replacing a shared link also revokes outstanding targeted invitations. captain transfers invalidate the old captain's targeted invitations. existing members stay.
 - the session cookie is http-only, same-site lax, secure in production, revocable at logout, and expires after seven days. provider tokens are not retained.
 
 ## production container
@@ -86,7 +82,7 @@ docker run --name hcav --restart unless-stopped \
 
 the image runs as non-root, listens on port 3000, and includes a healthcheck. it does not include `.env`, tests, or development dependencies. your orchestrator should supply equivalent environment settings and a persistent `/data` volume owned by uid 1000.
 
-**run exactly one application process/replica, with no overlapping rolling replicas.** airtable has no transactions or compare-and-swap, so membership mutations are serialized in that process. local sqlite provides durable sessions, oauth state, invitation tokens, suppression records, and atomic rate limits; airtable remains the registration database. do not use an ephemeral filesystem or share the sqlite file over a network filesystem. back up airtable and sqlite; loss of the latter also loses opt-outs and rate limits.
+**run exactly one application process/replica, with no overlapping rolling replicas.** airtable has no transactions or compare-and-swap, so membership mutations are serialized in that process. local sqlite provides durable sessions, oauth state, invitation tokens, atomic rate limits, signed-command deduplication, and channel-addition jobs/retries; airtable remains the registration database. do not use an ephemeral filesystem or share the sqlite file over a network filesystem. back up airtable and sqlite; losing sqlite also loses pending jobs and deduplication history.
 
 the public origin is `https://hcav.hackclub.com`. sveltekit 3's `paths.origin` is set at build time from `APP_ORIGIN`; adapter-node 6 does not support the old runtime `ORIGIN` variable. the docker build defaults to the production domain. to use another domain, pass `docker build --build-arg APP_ORIGIN=https://your-domain.example -t hcav .` and set the same `APP_ORIGIN` at runtime. a non-docker production build needs `APP_ORIGIN=https://hcav.hackclub.com bun run build`, then the matching runtime setting.
 
@@ -103,8 +99,8 @@ bun run test
 bun run build
 ```
 
-playwright uses the real application, real sqlite, browser interactions, and cryptographically signed oidc fixtures. airtable, slack, and hca are deterministic service doubles; outbound test network calls fail closed. tests cover sign-in rejection, csrf/logout, registration/joining, team permissions, recipient binding, revocation/opt-out, combined concurrent quotas, ineligible senders, and teams spanning airtable's 100-record pages. test data/screenshots stay in the repository's excluded `.amp/in/` directory.
+playwright uses the real application, real sqlite, browser interactions, and cryptographically signed oidc fixtures. airtable, slack, and hca are deterministic service doubles; outbound test network calls fail closed. test data/screenshots stay in the repository's excluded `.amp/in/` directory. service doubles do not establish real provider configuration.
 
-before opening registration, test real hca login for verified and unverified accounts, a team join from a second account, one email, one slack dm, and opt-out with the deployed proxy settings. tests with doubles cannot establish real provider configuration or email delivery.
+before opening registration, verify linked-slack login and rejection without a linked account, public profile fallback, a second account joining by bearer link, expiry/revocation, and open/closed registration with the deployed proxy settings. test `/hcav hq` in public and private channels, signature rejection, duplicate-command handling, persisted retries across restarts, and visible channel-error recovery without losing team membership. confirm the bot belongs to both shared channels and each hq.
 
-the landing page is a browser-default faq. edit its demo content in `src/routes/+page.svelte`; `src/lib/Faq.svelte` takes a `question` prop and renders nested html through svelte's `children` snippet. the rest of the interface uses tailwind and self-hosted comic neue (license in `static/fonts/OFL.txt`). there are no ai-generated images or third-party analytics.
+edit landing-page content in `src/routes/+page.svelte`; `src/lib/Faq.svelte` takes a `question` prop and renders nested html through svelte's `children` snippet. the rest of the interface uses tailwind. there are no ai-generated images or third-party analytics.

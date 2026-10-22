@@ -40,7 +40,7 @@ import Faq from '#lib/Faq.svelte';
 
 <Faq question="What happens during HCAV?">
 	<p>
-		Mostly plagarism, laughter, and sleep deprivation, in an attempt to complete the most Items and
+		Mostly plagiarism, laughter, and sleep deprivation, in an attempt to complete the most Items and
 		win glory.
 	</p>
 </Faq>
@@ -66,6 +66,10 @@ import Faq from '#lib/Faq.svelte';
 		complete them, posting completed Items in a Slack channel as you go. We check them and give you
 		points. Whichever team has the most points wins.
 	</p>
+</Faq>
+
+<Faq question="Do I need to know how to code?">
+	<p>It'll help.</p>
 </Faq>
 
 <Faq question="So this is like that scavenger hunt my third grade teacher did with us?">
@@ -123,6 +127,14 @@ import Faq from '#lib/Faq.svelte';
 	</p>
 </Faq>
 
+<Faq question="Can we cheat?">
+	<p>Only if it's impressive.</p>
+</Faq>
+
+<Faq question="Can we creatively interpret Items?">
+	<p>Yes, unless it's a bad interpretation.</p>
+</Faq>
+
 <Faq question="Can I bribe the Organizers?">
 	<p>We take Bitcoin, Ethereum, mailed check, and PayPal.</p>
 </Faq>
@@ -131,18 +143,60 @@ import Faq from '#lib/Faq.svelte';
 	<p>You can certainly try.</p>
 </Faq>
 
-<Faq question="Can we cheat?">
-	<p>Only if it's impressive.</p>
-</Faq>
-
 <Faq question="Who writes the list?">
 	<p>The Organization.</p>
 </Faq>
 
 <Faq question="Who is The Organization?">
 	<p>We are.</p>
-</Faqo>
+</Faq>
 
 <Faq question="Who's already signed up?">
-  <p>The following teams have bravely had their Captains sign up:</p>
+	<p>The following teams have bravely had their Captains sign up:</p>
+</Faq>
+
+<Faq question="Wait, if this is the second best scavenger hunt in the world, what's the first?">
+	<p>
+		The University of Chicago's annual <a href="https://scavhunt.uchicago.edu">Scav hunt</a>. For
+		those fortunate enough to not go to UChicago, HCAV is a suitable replacement.
+	</p>
+</Faq>
+
+<Faq question="How do I contact The Organization?">
+	<p>You don't. We contact you.</p>
+</Faq>
+
+<Faq question="What if I'm impatient?">
+	<p>Dial (248)-434-5508.</p>
+</Faq>
+
+<Faq question="Did you just rickroll me?">
+	<p>
+		Please direct any complaints to
+		<a href="https://hackclub.enterprise.slack.com/team/U0BPRSG2YUD">@The Organization</a>
+		on Slack.
+	</p>
+</Faq>
+
+<Faq question="Will HCAV happen again?">
+	<p>Let's survive this one first.</p>
+</Faq>
+
+<Faq question="How should I prepare?">
+	<p>
+		Make sure you have a team. We recommend teaming up with people you consider disposable.
+		Otherwise, eat a big breakfast and sleep in advance.
+	</p>
+</Faq>
+
+<Faq question="Any advice?">
+<p>Crimes are only illegal if you don't get caught.</p>
+</Faq>
+
+<Faq question="How do you pronounce HCAV?">
+<p>However your heart desires.</p>
+</Faq>
+
+<Faq question="Is that everything?">
+<p>No.</p>
 </Faq>

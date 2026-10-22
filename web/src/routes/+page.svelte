@@ -16,7 +16,7 @@ import Faq from '#lib/Faq.svelte';
 
 <Faq question="What is HCAV?">
 	<p>
-		The world's second best scavenger hunt. One weekend of doing stupid shit for imaginary points,
+		The world's second best scavenger hunt. One weekend of doing stupid crap for imaginary points,
 		for the cracked teenagers at <a href="https://hackclub.com">Hack Club</a> that have nothing
 		better to do.
 	</p>

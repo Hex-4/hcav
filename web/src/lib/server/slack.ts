@@ -225,8 +225,8 @@ async function work() {
 					);
 			console.error('slack channel work deferred', code);
 		}
-	} catch {
-		console.error('slack queue unavailable');
+	} catch (cause) {
+		console.error('slack queue unavailable', cause);
 	} finally {
 		running = false;
 	}

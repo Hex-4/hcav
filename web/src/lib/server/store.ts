@@ -9,9 +9,11 @@ let connection: DatabaseSync;
 export function db() {
 	if (!connection) {
 		const path = setting('SQLITE_PATH') || './data/hcav.sqlite';
-		mkdirSync(dirname(path), { recursive: true });
-		connection = new DatabaseSync(path);
-		connection.exec(`
+		let database: DatabaseSync | undefined;
+		try {
+			mkdirSync(dirname(path), { recursive: true });
+			database = new DatabaseSync(path);
+			database.exec(`
 			PRAGMA journal_mode = WAL;
 			PRAGMA busy_timeout = 5000;
 			CREATE TABLE IF NOT EXISTS sessions (hash TEXT PRIMARY KEY, identity TEXT NOT NULL, expires INTEGER NOT NULL);
@@ -28,7 +30,13 @@ export function db() {
 				status TEXT NOT NULL DEFAULT 'pending', problem TEXT NOT NULL DEFAULT '',
 				PRIMARY KEY(user_id, channel_id)
 			);
-		`);
+			`);
+			connection = database;
+		} catch (cause) {
+			database?.close();
+			console.error('sqlite initialization failed', path, cause);
+			throw cause;
+		}
 	}
 	return connection;
 }

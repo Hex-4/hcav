@@ -19,10 +19,11 @@ WORKDIR /app
 COPY --from=build --chown=bun:bun /app/build ./build
 COPY --from=build --chown=bun:bun /app/node_modules ./node_modules
 COPY --from=build --chown=bun:bun /app/package.json ./package.json
+COPY scripts/container-start.mjs ./scripts/container-start.mjs
+USER root
 RUN mkdir /data && chown bun:bun /data
-USER bun
 VOLUME /data
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD bun -e "fetch('http://127.0.0.1:3000/').then(r => { if (!r.ok) process.exit(1); }).catch(() => process.exit(1))"
-CMD ["bun", "./build/index.js"]
+CMD ["bun", "./scripts/container-start.mjs"]

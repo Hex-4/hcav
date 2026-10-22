@@ -3,7 +3,7 @@ WORKDIR /app
 COPY package.json bun.lock .npmrc ./
 RUN bun install --frozen-lockfile --ignore-scripts
 COPY . .
-ARG APP_ORIGIN=https://hcav.hackclub.com
+ARG APP_ORIGIN=https://hcav.hackclub.community
 RUN bun run build \
     && rm -rf node_modules \
     && bun install --production --frozen-lockfile --ignore-scripts
@@ -12,7 +12,7 @@ FROM oven/bun:1.4.2-slim AS runtime
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=3000 \
-    APP_ORIGIN=https://hcav.hackclub.com \
+    APP_ORIGIN=https://hcav.hackclub.community \
     SQLITE_PATH=/data/hcav.sqlite \
     BODY_SIZE_LIMIT=16K
 WORKDIR /app

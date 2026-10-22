@@ -20,7 +20,7 @@ create a confidential web application at https://auth.hackclub.com. set `HCA_CLI
 
 ```text
 http://localhost:5173/auth/callback
-https://hcav.hackclub.com/auth/callback
+https://hcav.hackclub.community/auth/callback
 ```
 
 the application requests `openid profile email slack_id verification_status`. confirm it can receive `sub`, `email`, `email_verified`, `slack_id`, `verification_status`, and `ysws_eligible` through authenticated userinfo. new logins require a linked slack account; users without one must link it through hca before signing in. hca remains the login provider; there is no slack user-login oauth flow. no identity documents are requested or stored.
@@ -50,7 +50,7 @@ create a slack app from `slack-manifest.json` and have a hack club workspace adm
 
 provide `SLACK_BOT_TOKEN` (the installed bot's `xoxb-…` token), `SLACK_TEAM_ID` (hack club's workspace id, starting with `T`), and `SLACK_SIGNING_SECRET` through the deployment's secret environment. slash commands require signature and timestamp verification with the signing secret. no event subscription, interactivity endpoint, or socket-mode connection is needed.
 
-configure `/hcav` with request url `https://hcav.hackclub.com/slack/command` and usage hint `hq`. invite the bot to `#hcav` (`C0BQ2GV0H0E`), `#hcav-submissions` (`C0CB9NR1N3W`), and every chosen team hq. a captain first invites the bot to an existing public or private channel, then runs `/hcav hq` inside that channel. the command confirms its outcome ephemerally and schedules channel additions through the persisted background queue.
+configure `/hcav` with request url `https://hcav.hackclub.community/slack/command` and usage hint `hq`. invite the bot to `#hcav` (`C0BQ2GV0H0E`), `#hcav-submissions` (`C0CB9NR1N3W`), and every chosen team hq. a captain first invites the bot to an existing public or private channel, then runs `/hcav hq` inside that channel. the command confirms its outcome ephemerally and schedules channel additions through the persisted background queue.
 
 the captain must also be the channel's creator, checked using `conversations.info` with the existing bot token. if the creator does not match the captain's slack id, or slack does not provide a creator, hq selection is refused. no admin token, user token, or additional scope is needed.
 
@@ -74,7 +74,7 @@ docker build -t hcav .
 docker volume create hcav-data
 docker run --name hcav --restart unless-stopped \
   --env-file .env \
-  -e APP_ORIGIN=https://hcav.hackclub.com \
+  -e APP_ORIGIN=https://hcav.hackclub.community \
   -e SQLITE_PATH=/data/hcav.sqlite \
   -p 127.0.0.1:3000:3000 \
   -v hcav-data:/data hcav
@@ -84,7 +84,7 @@ the image builds and runs with bun only, runs as the non-root `bun` user, listen
 
 **run exactly one application process/replica, with no overlapping rolling replicas.** airtable has no transactions or compare-and-swap, so membership mutations are serialized in that process. local sqlite provides durable sessions, oauth state, invitation tokens, atomic rate limits, signed-command deduplication, and channel-addition jobs/retries; airtable remains the registration database. do not use an ephemeral filesystem or share the sqlite file over a network filesystem. back up airtable and sqlite; losing sqlite also loses pending jobs and deduplication history.
 
-the public origin is `https://hcav.hackclub.com`. sveltekit 3's `paths.origin` is set at build time from `APP_ORIGIN`; adapter-node 6 does not support the old runtime `ORIGIN` variable. the docker build defaults to the production domain. to use another domain, pass `docker build --build-arg APP_ORIGIN=https://your-domain.example -t hcav .` and set the same `APP_ORIGIN` at runtime. a non-docker production build needs `APP_ORIGIN=https://hcav.hackclub.com bun run build`, then the matching runtime setting.
+the public origin is `https://hcav.hackclub.community`. sveltekit 3's `paths.origin` is set at build time from `APP_ORIGIN`; adapter-node 6 does not support the old runtime `ORIGIN` variable. the docker build defaults to the production domain. to use another domain, pass `docker build --build-arg APP_ORIGIN=https://your-domain.example -t hcav .` and set the same `APP_ORIGIN` at runtime. a non-docker production build needs `APP_ORIGIN=https://hcav.hackclub.community bun run build`, then the matching runtime setting.
 
 terminate tls at your proxy and prevent direct public access to the app port. set adapter-node's `ADDRESS_HEADER` and `XFF_DEPTH` for your actual trusted proxy chain. for exactly one proxy that overwrites incoming `X-Forwarded-For`, use `ADDRESS_HEADER=x-forwarded-for` and `XFF_DEPTH=1`. do not copy those settings without verifying your proxy behavior. the default is conservative but may group all visitors under the proxy ip and throttle them together. keep access logs from recording oauth callback queries or invitation secrets.
 

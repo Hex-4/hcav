@@ -12,7 +12,8 @@ export default defineConfig(({ command }) => ({
 			csrf: { trustedOrigins: ['*'] },
 			paths: {
 				origin:
-					process.env.APP_ORIGIN || (command === 'build' ? 'https://hcav.hackclub.com' : undefined)
+					process.env.APP_ORIGIN ||
+					(command === 'build' ? 'https://hcav.hackclub.community' : undefined)
 			},
 			compilerOptions: {
 				// Force runes mode for the project, except for libraries. Can be removed in svelte 6.

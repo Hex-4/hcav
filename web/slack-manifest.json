@@ -12,7 +12,7 @@
 		"slash_commands": [
 			{
 				"command": "/hcav",
-				"url": "https://hcav.hackclub.com/slack/command",
+				"url": "https://hcav.hackclub.community/slack/command",
 				"description": "Set this channel as your team's HQ",
 				"usage_hint": "hq",
 				"should_escape": false

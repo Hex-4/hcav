@@ -16,9 +16,7 @@ import Faq from '#lib/Faq.svelte';
 
 <Faq question="What is HCAV?">
 	<p>
-		The world's second best scavenger hunt. One weekend of doing stupid crap for imaginary points,
-		for the cracked teenagers at <a href="https://hackclub.com">Hack Club</a> that have nothing
-		better to do.
+		The world's second best scavenger hunt. One weekend of doing stupid crap for imaginary points, competing against other teenagers @ <a href="https://hackclub.com">Hack Club</a> for imaginary glory. And prizes that may or may not be imaginary.
 	</p>
 </Faq>
 
@@ -67,6 +65,10 @@ import Faq from '#lib/Faq.svelte';
 		complete them, posting completed Items in a Slack channel as you go. We check them and give you
 		points. Whichever team has the most points wins.
 	</p>
+</Faq>
+
+<Faq question="Is this a YSWS?">
+<p>No. You can submit anything you make here to any program that'll accept it. We're not sure many programs will.</p>
 </Faq>
 
 <Faq question="Do I need to know how to code?">

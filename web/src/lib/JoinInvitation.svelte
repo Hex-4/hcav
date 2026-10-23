@@ -22,7 +22,7 @@ let {
 >
 
 <h1>{teamName}</h1>
-<p>You’ve been invited to a HCAV teamName. Presumably on purpose.</p>
+<p>You’ve been invited to a HCAV team. Presumably on purpose.</p>
 {#if message}
 	<p role="status">{message}</p>
 {/if}
@@ -38,5 +38,7 @@ let {
 		<a href={`/auth/login?next=${encodeURIComponent(next)}`}>Sign in with Hack Club</a>
 		to join.
 	</p>
-  <p><b>What is this?</b>HCAV is the world's second best scavenger hunt. <a href="/">Learn more?</a></p>
+	<p>
+		<b>What is this?</b>HCAV is the world's second best scavenger hunt. <a href="/">Learn more?</a>
+	</p>
 {/if}

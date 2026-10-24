@@ -28,12 +28,19 @@ export const POST: RequestHandler = async ({ request }) => {
 			response_type: 'ephemeral',
 			text: 'Invite The Organization bot to your team channel, then run /hcav hq there.'
 		});
+	const responseUrl = form.get('response_url') || '';
+	if (responseUrl && !/^https:\/\/hooks\.slack\.com\/commands\/[A-Za-z0-9/_-]+$/.test(responseUrl))
+		error(400, 'Invalid Slack response URL.');
 	const id = hash(`${timestamp}:${body}`);
 	if (!db().prepare('SELECT 1 FROM slack_commands WHERE id = ?').get(id)) {
 		reserve([{ key: `slack-command:${user}`, window: 60_000, max: 5 }]);
 		db()
 			.prepare('INSERT INTO slack_commands (id, payload, at) VALUES (?, ?, ?)')
-			.run(id, JSON.stringify({ user, channel }), Date.now());
+			.run(
+				id,
+				JSON.stringify({ user, channel, responseUrl: responseUrl || undefined }),
+				Date.now()
+			);
 	}
 	return json({
 		response_type: 'ephemeral',

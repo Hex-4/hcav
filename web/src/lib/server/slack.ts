@@ -32,16 +32,20 @@ class SlackFailure extends Error {
 	}
 }
 
-async function api(method: string, body: object): Promise<SlackResult> {
-	const response = await fetch(`https://slack.com/api/${method}`, {
-		method: 'POST',
-		headers: {
-			Authorization: `Bearer ${required('SLACK_BOT_TOKEN')}`,
-			'Content-Type': 'application/json; charset=utf-8'
-		},
-		body: JSON.stringify(body),
-		signal: AbortSignal.timeout(10_000)
-	});
+async function api(method: string, body: Record<string, string>): Promise<SlackResult> {
+	const read = method === 'conversations.info';
+	const response = await fetch(
+		`https://slack.com/api/${method}${read ? `?${new URLSearchParams(body)}` : ''}`,
+		{
+			method: read ? 'GET' : 'POST',
+			headers: {
+				Authorization: `Bearer ${required('SLACK_BOT_TOKEN')}`,
+				'Content-Type': 'application/json; charset=utf-8'
+			},
+			body: read ? undefined : JSON.stringify(body),
+			signal: AbortSignal.timeout(10_000)
+		}
+	);
 	if (!response.ok)
 		throw new SlackFailure(
 			response.status === 429 ? 'ratelimited' : 'slack_unavailable',
@@ -90,7 +94,7 @@ export function channelStatus(slackId: string, hqId = '') {
 	});
 }
 
-type Command = { user: string; channel: string; result?: string };
+type Command = { user: string; channel: string; responseUrl?: string; result?: string };
 type ChannelJob = { user_id: string; channel_id: string; team_id: string; attempts: number };
 
 async function setHq(command: Command) {
@@ -164,11 +168,27 @@ async function work() {
 						.prepare('UPDATE slack_commands SET payload = ? WHERE id = ?')
 						.run(JSON.stringify(payload), String(command.id));
 				}
-				await api('chat.postEphemeral', {
-					channel: payload.channel,
-					user: payload.user,
-					text: payload.result
-				});
+				if (payload.responseUrl) {
+					const response = await fetch(payload.responseUrl, {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json; charset=utf-8' },
+						body: JSON.stringify({ response_type: 'ephemeral', text: payload.result }),
+						redirect: 'error',
+						signal: AbortSignal.timeout(10_000)
+					});
+					if (!response.ok)
+						throw new SlackFailure(
+							'command_response_failed',
+							Number(response.headers.get('retry-after') || 30) * 1000
+						);
+				} else {
+					// commands queued before response urls were stored still need a reply.
+					await api('chat.postEphemeral', {
+						channel: payload.channel,
+						user: payload.user,
+						text: payload.result
+					});
+				}
 				db().prepare('UPDATE slack_commands SET done = 1 WHERE id = ?').run(String(command.id));
 			} else if (job) {
 				if (job.team_id) {

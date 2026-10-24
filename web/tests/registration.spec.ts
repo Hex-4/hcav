@@ -326,7 +326,13 @@ async function command(
 	request: APIRequestContext,
 	user: string,
 	channel: string,
-	options: { timestamp?: number; invalid?: boolean; workspace?: string; trigger?: string } = {}
+	options: {
+		timestamp?: number;
+		invalid?: boolean;
+		workspace?: string;
+		trigger?: string;
+		responseUrl?: string;
+	} = {}
 ) {
 	const timestamp = String(options.timestamp ?? Math.floor(Date.now() / 1000));
 	const body = new URLSearchParams({
@@ -335,6 +341,8 @@ async function command(
 		user_id: user,
 		channel_id: channel,
 		team_id: options.workspace || 'TTEST00001',
+		response_url:
+			options.responseUrl ?? `https://hooks.slack.com/commands/${channel}/${user}/test-response`,
 		trigger_id: options.trigger || `${Date.now()}-${channel}`
 	}).toString();
 	const signature = `v0=${createHmac(
@@ -374,13 +382,19 @@ test('signed slack hq commands enforce captain authority, deduplicate and add cu
 	expect((await command(request, user, 'CPUBLIC001', { workspace: 'TOTHER001' })).status()).toBe(
 		403
 	);
+	for (const responseUrl of [
+		'https://hooks.slack.com.evil.example/commands/test',
+		'http://hooks.slack.com/commands/test',
+		'https://hooks.slack.com/services/test'
+	])
+		expect((await command(request, user, 'CPUBLIC001', { responseUrl })).status()).toBe(400);
 	expect((await command(request, person('hq-guest').slack_id, 'CPUBLIC001')).status()).toBe(200);
 	await expect
 		.poll(
 			() =>
 				state().slack.some(
 					(row) =>
-						row.method === 'chat.postEphemeral' &&
+						row.method === 'command.response' &&
 						row.user === person('hq-guest').slack_id &&
 						row.text?.includes('Only your team captain')
 				),
@@ -406,7 +420,7 @@ test('signed slack hq commands enforce captain authority, deduplicate and add cu
 	expect(
 		state().slack.filter(
 			(row) =>
-				row.method === 'chat.postEphemeral' && row.user === user && row.channel === 'CPUBLIC001'
+				row.method === 'command.response' && row.user === user && row.channel === 'CPUBLIC001'
 		)
 	).toHaveLength(1);
 	const future = await actorContext(browser, 'hq-future');
@@ -453,7 +467,7 @@ test('signed slack hq commands enforce captain authority, deduplicate and add cu
 			() =>
 				state().slack.some(
 					(row) =>
-						row.method === 'chat.postEphemeral' &&
+						row.method === 'command.response' &&
 						row.channel === 'CNOBOT0001' &&
 						row.text?.startsWith('Invite The Organization')
 				),
@@ -479,7 +493,7 @@ test('hq requires the captain to be the channel creator', async ({ browser, requ
 				() =>
 					state().slack.some(
 						(row) =>
-							row.method === 'chat.postEphemeral' &&
+							row.method === 'command.response' &&
 							row.channel === channel &&
 							row.user === user &&
 							row.text === 'You must have created this Slack channel to set it as HQ.'
@@ -538,7 +552,7 @@ test('channel failures preserve team membership and can be retried without sendi
 	await capture(page, 'channel-recovered');
 	expect(
 		state().slack.every((row) =>
-			['conversations.invite', 'chat.postEphemeral'].includes(row.method)
+			['conversations.invite', 'chat.postEphemeral', 'command.response'].includes(row.method)
 		)
 	).toBe(true);
 	await captain.close();

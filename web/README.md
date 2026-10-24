@@ -52,6 +52,8 @@ provide `SLACK_BOT_TOKEN` (the installed bot's `xoxb-…` token), `SLACK_TEAM_ID
 
 configure `/hcav` with request url `https://hcav.hackclub.community/slack/command` and usage hint `hq`. invite the bot to `#hcav` (`C0BQ2GV0H0E`), `#hcav-submissions` (`C0CB9NR1N3W`), and every chosen team hq. a captain first invites the bot to an existing public or private channel, then runs `/hcav hq` inside that channel. the command confirms its outcome ephemerally and schedules channel additions through the persisted background queue.
 
+new commands send their follow-up through slack's signed-payload `response_url`, so even a missing-bot warning can be delivered before the bot joins the channel. these temporary urls are secrets stored in the sqlite command queue; protect database backups and do not log command payloads. commands queued before this change retain the old ephemeral-api reply path; rerun `/hcav hq` after deploying the fix rather than replaying old commands. no slack app configuration or scope changes are required.
+
 the captain must also be the channel's creator, checked using `conversations.info` with the existing bot token. if the creator does not match the captain's slack id, or slack does not provide a creator, hq selection is refused. no admin token, user token, or additional scope is needed.
 
 sqlite persists signed-command deduplication and channel-addition jobs with retries. joining registration adds members to the shared channels and their team's chosen hq. channel api errors do not roll back registration membership; the ui shows delivery state and a retry action. leaving a team or being removed never automatically removes anyone from slack channels. changing hq adds existing team members to the new hq without removing them from the old one.

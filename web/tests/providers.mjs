@@ -150,11 +150,23 @@ globalThis.fetch = async (input, options) => {
 			imageUrl: 'https://avatars.slack-edge.com/test.png'
 		});
 	}
+	if (url.origin === 'https://hooks.slack.com') {
+		const [, , channel, user] = url.pathname.split('/');
+		const body = await request.json();
+		if (request.headers.has('authorization') || body.response_type !== 'ephemeral')
+			throw new Error('command replies must be private and must not forward the bot token');
+		state.slack.push({ method: 'command.response', channel, user, text: body.text });
+		persist();
+		return new Response('ok');
+	}
 	if (url.origin === 'https://slack.com') {
 		const method = url.pathname.split('/').at(-1);
-		const body = await request.json();
+		const body =
+			request.method === 'GET' ? Object.fromEntries(url.searchParams) : await request.json();
 		if (method === 'auth.test') return json({ ok: true, team_id: 'TTEST00001' });
-		if (method === 'conversations.info')
+		if (method === 'conversations.info') {
+			if (request.method !== 'GET' || !body.channel)
+				return json({ ok: false, error: 'invalid_arguments' });
 			return json({
 				ok: true,
 				channel: {
@@ -175,7 +187,10 @@ globalThis.fetch = async (input, options) => {
 					is_archived: false
 				}
 			});
+		}
 		if (method === 'conversations.invite' || method === 'chat.postEphemeral') {
+			if (method === 'chat.postEphemeral' && body.channel === 'CNOBOT0001')
+				return json({ ok: false, error: 'not_in_channel' });
 			const previous = state.slack.filter(
 				(row) => row.method === method && row.channel === body.channel && row.users === body.users
 			).length;

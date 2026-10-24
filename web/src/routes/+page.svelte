@@ -131,7 +131,7 @@ import Faq from '#lib/Faq.svelte';
 </Faq>
 
 <Faq question="Can we cheat?">
-	<p>Only if it's impressive.</p>
+	<p>Only if cheating takes more effort than doing it properly.</p>
 </Faq>
 
 <Faq question="Can we creatively interpret Items?">
@@ -191,11 +191,6 @@ import Faq from '#lib/Faq.svelte';
 		Otherwise, eat a big breakfast and sleep in advance.
 	</p>
 </Faq>
-
-<Faq question="Any advice?">
-	<p>Crimes are only illegal if you don't get caught.</p>
-</Faq>
-
 <Faq question="How do you pronounce HCAV?">
 	<p>However your heart desires.</p>
 </Faq>
